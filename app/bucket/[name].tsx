@@ -3,6 +3,17 @@ import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { ObjectItem } from '@/components/object-item';
 import { Breadcrumb } from '@/components/breadcrumb';
 import { EmptyState } from '@/components/empty-state';
@@ -16,6 +27,7 @@ import {
   DownloadIcon,
   UploadIcon,
   FolderIcon,
+  FolderPlusIcon,
   ChevronLeftIcon,
   EyeIcon,
   DatabaseIcon,
@@ -25,11 +37,20 @@ import {
   PlusIcon,
 } from 'lucide-react-native';
 import * as React from 'react';
-import { View, FlatList, RefreshControl, Pressable, Platform, Share } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import {
+  View,
+  FlatList,
+  RefreshControl,
+  Pressable,
+  Platform,
+  Share,
+  ActivityIndicator,
+  BackHandler,
+} from 'react-native';
+import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import { Paths, Directory, File as FSFile } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import type { S3Object, TransferTask } from '@/lib/types';
 import { Progress } from '@/components/ui/progress';
@@ -73,6 +94,7 @@ export default function ObjectBrowserScreen() {
     connectionId: string;
   }>();
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const {
     currentPrefix,
@@ -84,6 +106,7 @@ export default function ObjectBrowserScreen() {
     setObjects,
     setLoading,
     toggleSelection,
+    selectAll,
     clearSelection,
     breadcrumbs,
   } = useObjectStore();
@@ -148,6 +171,23 @@ export default function ObjectBrowserScreen() {
   // Track whether we've done at least one successful load
   const [initialLoaded, setInitialLoaded] = React.useState(false);
 
+  // Selection mode — off by default, activated by long-press on file
+  const [selectionMode, setSelectionMode] = React.useState(false);
+
+  // Expandable FAB
+  const [fabExpanded, setFabExpanded] = React.useState(false);
+
+  // Create folder
+  const [showCreateFolderDialog, setShowCreateFolderDialog] = React.useState(false);
+  const [newFolderName, setNewFolderName] = React.useState('');
+  const [isCreatingFolder, setIsCreatingFolder] = React.useState(false);
+  const [createFolderError, setCreateFolderError] = React.useState('');
+
+  // Delete folder
+  const [deleteFolderTarget, setDeleteFolderTarget] = React.useState<S3Object | null>(null);
+  const [showDeleteFolderDialog, setShowDeleteFolderDialog] = React.useState(false);
+  const [isDeletingFolder, setIsDeletingFolder] = React.useState(false);
+
   // Thumbnail presigned URLs cache
   const [thumbnailUrls, setThumbnailUrls] = React.useState<Record<string, string>>({});
 
@@ -165,23 +205,29 @@ export default function ObjectBrowserScreen() {
     async (forceRefresh = false) => {
       if (!bucketName || !connectionId) return;
 
+      // If objects already present (from store prefix cache), mark as loaded immediately
+      const hasStoreCache = objects.length > 0;
+
       // Stale-while-revalidate: show cached data instantly, then refresh in background
       if (!forceRefresh) {
-        const cached = await S3Service.listObjects(connectionId, bucketName, currentPrefix);
-        // listObjects now returns from cache if available (instant)
-        if (cached.length > 0) {
-          setObjects(cached);
+        if (hasStoreCache) {
+          // Store cache already populated — skip loading indicator, just refresh in background
           setInitialLoaded(true);
         } else {
-          setLoading(true);
+          const cached = await S3Service.listObjects(connectionId, bucketName, currentPrefix);
+          if (cached.length > 0) {
+            setObjects(cached);
+            setInitialLoaded(true);
+          } else {
+            setLoading(true);
+          }
         }
         // Always fetch fresh data in background
         try {
           const fresh = await S3Service.listObjectsFresh(connectionId, bucketName, currentPrefix);
           setObjects(fresh);
         } catch (error: any) {
-          // If we already showed cached data, swallow the error
-          if (cached.length === 0) console.error('Failed to load objects:', error);
+          if (!hasStoreCache) console.error('Failed to load objects:', error);
         } finally {
           setLoading(false);
           setInitialLoaded(true);
@@ -245,6 +291,47 @@ export default function ObjectBrowserScreen() {
     },
     [setCurrentPrefix]
   );
+
+  const handleFolderLongPress = React.useCallback((folder: S3Object) => {
+    setDeleteFolderTarget(folder);
+    setShowDeleteFolderDialog(true);
+  }, []);
+
+  // ── Create folder ──────────────────────────────────────────────────────
+  const handleCreateFolder = React.useCallback(async () => {
+    if (!newFolderName.trim() || !bucketName || !connectionId) return;
+    setIsCreatingFolder(true);
+    setCreateFolderError('');
+    try {
+      const folderKey = currentPrefix + newFolderName.trim().replace(/\/$/, '') + '/';
+      await S3Service.putEmptyObject(connectionId, bucketName, folderKey);
+      setNewFolderName('');
+      setShowCreateFolderDialog(false);
+      invalidateBucketCache(connectionId, bucketName);
+      loadObjects(true);
+    } catch (error: any) {
+      setCreateFolderError(error.message || 'Failed to create folder');
+    } finally {
+      setIsCreatingFolder(false);
+    }
+  }, [newFolderName, bucketName, connectionId, currentPrefix, loadObjects]);
+
+  // ── Delete folder ──────────────────────────────────────────────────────
+  const confirmDeleteFolder = React.useCallback(async () => {
+    if (!deleteFolderTarget || !bucketName || !connectionId) return;
+    setIsDeletingFolder(true);
+    try {
+      await S3Service.deleteFolderRecursive(connectionId, bucketName, deleteFolderTarget.key);
+      setShowDeleteFolderDialog(false);
+      setDeleteFolderTarget(null);
+      invalidateBucketCache(connectionId, bucketName);
+      loadObjects(true);
+    } catch (error: any) {
+      console.error('Delete folder failed:', error);
+    } finally {
+      setIsDeletingFolder(false);
+    }
+  }, [deleteFolderTarget, bucketName, connectionId, loadObjects]);
 
   const handleGoUp = React.useCallback(() => {
     const parts = currentPrefix.split('/').filter(Boolean);
@@ -319,16 +406,15 @@ export default function ObjectBrowserScreen() {
         const url = await S3Service.getPresignedUrl(connectionId, bucketName, obj.key);
 
         // Ensure download directory exists
-        const downloadDir = FileSystem.documentDirectory + 's3downloads/';
-        const dirInfo = await FileSystem.getInfoAsync(downloadDir);
-        if (!dirInfo.exists) {
-          await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
+        const downloadDir = new Directory(Paths.document, 's3downloads');
+        if (!downloadDir.exists) {
+          downloadDir.create({ intermediates: true });
         }
 
-        const destUri = downloadDir + obj.name;
+        const destFile = new FSFile(downloadDir, obj.name);
         updateTask(taskId, { progress: 10 });
 
-        const downloadResult = await FileSystem.downloadAsync(url, destUri);
+        const downloadResult = await FSFile.downloadFileAsync(url, destFile, { idempotent: true });
 
         updateTask(taskId, {
           progress: 100,
@@ -358,6 +444,7 @@ export default function ObjectBrowserScreen() {
     for (const obj of selected) {
       downloadFile(obj);
     }
+    setSelectionMode(false);
     clearSelection();
   }, [objects, selectedKeys, downloadFile, clearSelection]);
 
@@ -379,6 +466,7 @@ export default function ObjectBrowserScreen() {
         selected.map((o) => o.key)
       );
       clearSelection();
+      setSelectionMode(false);
       loadObjects(true);
     } catch (error: any) {
       console.error('Delete failed:', error);
@@ -526,26 +614,82 @@ export default function ObjectBrowserScreen() {
     (obj: S3Object) => {
       if (obj.isFolder) {
         handleFolderPress(obj);
+      } else if (selectionMode) {
+        // In selection mode, tap toggles selection
+        toggleSelection(obj.key);
       } else if (S3Service.isPreviewable(obj.name)) {
         handlePreview(obj);
       } else {
+        // Non-previewable file outside selection mode — enter selection mode
+        setSelectionMode(true);
         toggleSelection(obj.key);
       }
     },
-    [handleFolderPress, handlePreview, toggleSelection]
+    [handleFolderPress, handlePreview, toggleSelection, selectionMode]
   );
+
+  const handleFileLongPress = React.useCallback(
+    (obj: S3Object) => {
+      if (obj.isFolder) return;
+      setSelectionMode(true);
+      setFabExpanded(false);
+      if (!selectedKeys.has(obj.key)) {
+        toggleSelection(obj.key);
+      }
+    },
+    [selectedKeys, toggleSelection]
+  );
+
+  const exitSelectionMode = React.useCallback(() => {
+    setSelectionMode(false);
+    clearSelection();
+  }, [clearSelection]);
+
+  // Intercept back gesture / hardware back when in selection mode
+  React.useEffect(() => {
+    if (!selectionMode) return;
+
+    // Android hardware back button
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      exitSelectionMode();
+      return true; // prevent default back navigation
+    });
+
+    // iOS swipe-back gesture & navigation back
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      e.preventDefault();
+      exitSelectionMode();
+    });
+
+    return () => {
+      backHandler.remove();
+      unsubscribe();
+    };
+  }, [selectionMode, exitSelectionMode, navigation]);
 
   const renderItem = React.useCallback(
     ({ item }: { item: S3Object }) => (
       <ObjectItem
         object={item}
         isSelected={selectedKeys.has(item.key)}
+        selectionMode={selectionMode}
         thumbnailUrl={thumbnailUrls[item.key]}
         onPress={() => handleFilePress(item)}
         onToggle={() => toggleSelection(item.key)}
+        onLongPress={
+          item.isFolder ? () => handleFolderLongPress(item) : () => handleFileLongPress(item)
+        }
       />
     ),
-    [selectedKeys, thumbnailUrls, handleFilePress, toggleSelection]
+    [
+      selectedKeys,
+      selectionMode,
+      thumbnailUrls,
+      handleFilePress,
+      toggleSelection,
+      handleFolderLongPress,
+      handleFileLongPress,
+    ]
   );
 
   const listData = React.useMemo(() => {
@@ -564,8 +708,16 @@ export default function ObjectBrowserScreen() {
     <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
       {/* Custom Header */}
       <View className="flex-row items-center gap-2 px-4 pt-3 pb-2">
-        <Pressable onPress={() => router.back()} className="rounded-md p-1">
-          <Icon as={ChevronLeftIcon} className="text-foreground size-6" />
+        <Pressable
+          onPress={() => {
+            if (selectionMode) {
+              exitSelectionMode();
+            } else {
+              router.back();
+            }
+          }}
+          className="rounded-md p-1">
+          <Icon as={selectionMode ? XIcon : ChevronLeftIcon} className="text-foreground size-6" />
         </Pressable>
         <Icon as={DatabaseIcon} className="text-foreground size-5" />
         <Text className="text-foreground flex-1 text-lg font-semibold" numberOfLines={1}>
@@ -582,9 +734,18 @@ export default function ObjectBrowserScreen() {
       </View>
 
       {/* Column Header */}
-      <View className="flex-row items-center justify-between px-4 py-2">
-        <Text className="text-muted-foreground flex-1 text-xs font-medium uppercase">Name</Text>
-        <Text className="text-muted-foreground w-20 text-right text-xs font-medium uppercase">
+      <View className="flex-row items-center gap-3 px-4 py-2">
+        {selectionMode && (
+          <Checkbox
+            checked={fileCount > 0 && selectedKeys.size === fileCount}
+            onCheckedChange={(checked) => {
+              if (checked) selectAll();
+              else clearSelection();
+            }}
+          />
+        )}
+        <Text className="text-muted-foreground flex-1 text-xs font-medium uppercase">File(s)</Text>
+        <Text className="text-muted-foreground w-16 text-right text-xs font-medium uppercase">
           Size
         </Text>
       </View>
@@ -601,7 +762,6 @@ export default function ObjectBrowserScreen() {
               <Pressable
                 onPress={handleGoUp}
                 className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
-                <View className="w-6" />
                 <Icon as={ChevronLeftIcon} className="text-muted-foreground size-5" />
                 <Text className="text-foreground">..</Text>
               </Pressable>
@@ -682,18 +842,66 @@ export default function ObjectBrowserScreen() {
         </View>
       )}
 
-      {/* Upload FAB */}
-      <Pressable
-        onPress={handleUpload}
-        className="bg-primary active:bg-primary/80 absolute right-5 items-center justify-center rounded-full shadow-lg shadow-black/25"
-        style={{
-          bottom:
-            selectedCount > 0 ? 80 + Math.max(insets.bottom, 12) : 24 + Math.max(insets.bottom, 12),
-          width: 56,
-          height: 56,
-        }}>
-        <Icon as={PlusIcon} className="text-primary-foreground size-6" />
-      </Pressable>
+      {/* Long-press hint — fixed at bottom */}
+      {!selectionMode && selectedCount === 0 && (
+        <View
+          className="absolute right-0 bottom-0 left-0 items-center"
+          style={{ paddingBottom: Math.max(insets.bottom, 8) }}
+          pointerEvents="none">
+          <Text className="text-muted-foreground/60 text-xs">long press to select</Text>
+        </View>
+      )}
+
+      {/* FAB backdrop */}
+      {fabExpanded && (
+        <Pressable
+          onPress={() => setFabExpanded(false)}
+          className="absolute inset-0"
+          style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}
+        />
+      )}
+
+      {/* FAB — Expandable actions */}
+      {!selectionMode && (
+        <View
+          className="absolute right-5 items-end gap-3"
+          style={{
+            bottom: 24 + Math.max(insets.bottom, 12),
+          }}>
+          {fabExpanded && (
+            <>
+              <Pressable
+                onPress={() => {
+                  setFabExpanded(false);
+                  handleUpload();
+                }}
+                className="bg-secondary active:bg-secondary/80 flex-row items-center gap-2 rounded-full px-4 shadow-lg shadow-black/25"
+                style={{ height: 44 }}>
+                <Icon as={UploadIcon} className="text-secondary-foreground size-5" />
+                <Text className="text-secondary-foreground text-sm font-medium">Upload</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  setFabExpanded(false);
+                  setNewFolderName('');
+                  setCreateFolderError('');
+                  setShowCreateFolderDialog(true);
+                }}
+                className="bg-secondary active:bg-secondary/80 flex-row items-center gap-2 rounded-full px-4 shadow-lg shadow-black/25"
+                style={{ height: 44 }}>
+                <Icon as={FolderPlusIcon} className="text-secondary-foreground size-5" />
+                <Text className="text-secondary-foreground text-sm font-medium">New Folder</Text>
+              </Pressable>
+            </>
+          )}
+          <Pressable
+            onPress={() => setFabExpanded((v) => !v)}
+            className="bg-primary active:bg-primary/80 items-center justify-center rounded-full shadow-lg shadow-black/25"
+            style={{ width: 56, height: 56 }}>
+            <Icon as={fabExpanded ? XIcon : PlusIcon} className="text-primary-foreground size-6" />
+          </Pressable>
+        </View>
+      )}
 
       {/* File Preview Modal */}
       <FilePreview
@@ -758,6 +966,77 @@ export default function ObjectBrowserScreen() {
                 setDownloadCompleteDialog(null);
               }}>
               <Text className="text-primary-foreground">Share</Text>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Create Folder Dialog */}
+      <Dialog open={showCreateFolderDialog} onOpenChange={setShowCreateFolderDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create Folder</DialogTitle>
+            <DialogDescription>Enter a name for the new folder.</DialogDescription>
+          </DialogHeader>
+          <View className="gap-4">
+            <View className="gap-2">
+              <Label>Folder Name</Label>
+              <Input
+                placeholder="new-folder"
+                value={newFolderName}
+                onChangeText={(text) => {
+                  setNewFolderName(text);
+                  if (createFolderError) setCreateFolderError('');
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            {createFolderError ? (
+              <View className="bg-destructive/10 rounded-lg p-3">
+                <Text className="text-destructive text-sm">{createFolderError}</Text>
+              </View>
+            ) : null}
+          </View>
+          <DialogFooter>
+            <Button variant="outline" onPress={() => setShowCreateFolderDialog(false)}>
+              <Text>Cancel</Text>
+            </Button>
+            <Button
+              onPress={handleCreateFolder}
+              disabled={isCreatingFolder || !newFolderName.trim()}>
+              {isCreatingFolder ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <Text className="text-primary-foreground">Create</Text>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Folder Confirmation */}
+      <AlertDialog open={showDeleteFolderDialog} onOpenChange={setShowDeleteFolderDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Folder</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete "{deleteFolderTarget?.name}" and all contents? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onPress={() => {
+                setShowDeleteFolderDialog(false);
+                setDeleteFolderTarget(null);
+              }}>
+              <Text>Cancel</Text>
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onPress={confirmDeleteFolder}
+              disabled={isDeletingFolder}>
+              <Text>{isDeletingFolder ? 'Deleting...' : 'Delete'}</Text>
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

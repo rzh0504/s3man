@@ -7,6 +7,8 @@ interface ObjectState {
   objects: S3Object[];
   selectedKeys: Set<string>;
   isLoading: boolean;
+  /** Per-prefix cache so navigating back shows data instantly */
+  _prefixCache: Map<string, S3Object[]>;
   setCurrentBucket: (bucket: string) => void;
   setCurrentPrefix: (prefix: string) => void;
   setObjects: (objects: S3Object[]) => void;
@@ -24,10 +26,36 @@ export const useObjectStore = create<ObjectState>((set, get) => ({
   objects: [],
   selectedKeys: new Set<string>(),
   isLoading: false,
+  _prefixCache: new Map(),
 
-  setCurrentBucket: (currentBucket) => set({ currentBucket, currentPrefix: '', objects: [], selectedKeys: new Set() }),
-  setCurrentPrefix: (currentPrefix) => set({ currentPrefix, objects: [], selectedKeys: new Set() }),
-  setObjects: (objects) => set({ objects }),
+  setCurrentBucket: (currentBucket) =>
+    set({ currentBucket, currentPrefix: '', objects: [], selectedKeys: new Set(), _prefixCache: new Map() }),
+
+  setCurrentPrefix: (currentPrefix) => {
+    const state = get();
+    // Save current objects into prefix cache before switching
+    if (state.objects.length > 0) {
+      const cacheKey = `${state.currentBucket}:${state.currentPrefix}`;
+      state._prefixCache.set(cacheKey, state.objects);
+    }
+    // Restore from cache if available (instant navigation)
+    const newCacheKey = `${state.currentBucket}:${currentPrefix}`;
+    const cached = state._prefixCache.get(newCacheKey);
+    set({
+      currentPrefix,
+      objects: cached ?? [],
+      selectedKeys: new Set(),
+    });
+  },
+
+  setObjects: (objects) => {
+    const state = get();
+    // Also update the prefix cache
+    const cacheKey = `${state.currentBucket}:${state.currentPrefix}`;
+    state._prefixCache.set(cacheKey, objects);
+    set({ objects });
+  },
+
   setLoading: (isLoading) => set({ isLoading }),
 
   toggleSelection: (key) =>

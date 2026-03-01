@@ -20,7 +20,7 @@ import {
   FilmIcon,
 } from 'lucide-react-native';
 import React from 'react';
-import { View } from 'react-native';
+import { View, Image } from 'react-native';
 import { getFileExtension } from '@/lib/constants';
 import type { LucideIcon } from 'lucide-react-native';
 
@@ -65,6 +65,11 @@ export const TransferItem = React.memo(function TransferItem({
   onRemove,
 }: TransferItemProps) {
   const TransferIcon = getTransferIcon(task.fileName);
+  const isImage = (() => {
+    const ext = getFileExtension(task.fileName);
+    return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(ext);
+  })();
+  const hasThumbnail = isImage && !!task.localPath;
   const isActive = task.status === 'active';
   const isPaused = task.status === 'paused';
   const isCompleted = task.status === 'completed';
@@ -95,7 +100,15 @@ export const TransferItem = React.memo(function TransferItem({
       <CardContent className="gap-3 px-4">
         {/* Header row */}
         <View className="flex-row items-center gap-3">
-          <Icon as={TransferIcon} className="text-muted-foreground size-6" />
+          {hasThumbnail ? (
+            <Image
+              source={{ uri: task.localPath }}
+              className="size-10 rounded-md"
+              resizeMode="cover"
+            />
+          ) : (
+            <Icon as={TransferIcon} className="text-muted-foreground size-6" />
+          )}
           <View className="flex-1">
             <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
               {task.fileName}

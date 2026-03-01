@@ -4,6 +4,16 @@ import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -28,10 +38,18 @@ import {
   DatabaseIcon,
   RefreshCwIcon,
   ChevronRightIcon,
+  Trash2Icon,
 } from 'lucide-react-native';
 import type { S3Provider } from '@/lib/types';
 import * as React from 'react';
-import { View, ScrollView, RefreshControl, ActivityIndicator, Pressable } from 'react-native';
+import {
+  View,
+  ScrollView,
+  RefreshControl,
+  ActivityIndicator,
+  Pressable,
+  Alert,
+} from 'react-native';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -67,18 +85,20 @@ function ProviderSectionCard({
   onToggle,
   onBucketPress,
   onCreateBucket,
+  onDeleteBucket,
 }: {
   section: ProviderSection;
   collapsed: boolean;
   onToggle: () => void;
   onBucketPress: (bucket: BucketInfo) => void;
   onCreateBucket: (connectionId: string) => void;
+  onDeleteBucket: (bucket: BucketInfo) => void;
 }) {
   const conn = section.connection;
   const providerInfo = getProvider(conn.config.provider);
 
   const chevronStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: withTiming(collapsed ? '0deg' : '90deg', { duration: 200 }) }],
+    transform: [{ rotate: withTiming(collapsed ? '0deg' : '90deg', { duration: 300 }) }],
   }));
 
   return (
@@ -112,7 +132,7 @@ function ProviderSectionCard({
 
       {/* Bucket list — collapsible */}
       {!collapsed && (
-        <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(150)}>
+        <Animated.View entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)}>
           <Separator />
           {section.buckets.length === 0 ? (
             <View className="items-center py-6">
@@ -124,6 +144,7 @@ function ProviderSectionCard({
                 key={`${bucket.connectionId}-${bucket.name}`}
                 bucket={bucket}
                 onPress={() => onBucketPress(bucket)}
+                onLongPress={() => onDeleteBucket(bucket)}
               />
             ))
           )}
@@ -139,17 +160,29 @@ export default function BucketIndexScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const connections = useConnectionStore((s) => s.connections);
+  const isInitializing = useConnectionStore((s) => s.isInitializing);
   const { buckets, isLoading, setBucketsForConnection, setLoading } = useBucketStore();
 
   const [showCreateDialog, setShowCreateDialog] = React.useState(false);
   const [newBucketName, setNewBucketName] = React.useState('');
   const [isCreating, setIsCreating] = React.useState(false);
+  const [createError, setCreateError] = React.useState('');
   const [createForConnectionId, setCreateForConnectionId] = React.useState<string | null>(null);
   const [initialLoaded, setInitialLoaded] = React.useState(false);
-  const [collapsedIds, setCollapsedIds] = React.useState<Set<string>>(new Set());
+  const [collapsedIds, setCollapsedIds] = React.useState<Set<string> | 'all'>('all');
+
+  // Delete bucket state
+  const [deleteBucketTarget, setDeleteBucketTarget] = React.useState<BucketInfo | null>(null);
+  const [isDeletingBucket, setIsDeletingBucket] = React.useState(false);
 
   const connectedList = React.useMemo(
     () => connections.filter((c) => c.status === 'connected'),
+    [connections]
+  );
+
+  // Include 'connecting' connections so we don't flash 'Not Connected' during boot
+  const activeOrConnectingList = React.useMemo(
+    () => connections.filter((c) => c.status === 'connected' || c.status === 'connecting'),
     [connections]
   );
 
@@ -174,17 +207,26 @@ export default function BucketIndexScreen() {
 
   // ── Collapse / Expand ──────────────────────────────────────────────────
 
-  const toggleCollapse = React.useCallback((id: string) => {
-    setCollapsedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
+  const toggleCollapse = React.useCallback(
+    (id: string) => {
+      setCollapsedIds((prev) => {
+        if (prev === 'all') {
+          // All collapsed — expand this one (collapse the rest)
+          const allIds = new Set(connectedList.map((c) => c.id));
+          allIds.delete(id);
+          return allIds;
+        }
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      });
+    },
+    [connectedList]
+  );
 
   // ── Load buckets for ALL connected providers ───────────────────────────
 
@@ -208,23 +250,55 @@ export default function BucketIndexScreen() {
     }
   }, [connectedList, setBucketsForConnection, setLoading]);
 
+  // Track connected IDs so we only reload newly-connected providers
+  const prevConnectedIdsRef = React.useRef<Set<string>>(new Set());
+
   React.useEffect(() => {
-    if (connectedList.length > 0) {
+    const currentIds = new Set(connectedList.map((c) => c.id));
+    const prevIds = prevConnectedIdsRef.current;
+
+    // Find newly connected providers (not in previous set)
+    const newIds = connectedList.filter((c) => !prevIds.has(c.id));
+    prevConnectedIdsRef.current = currentIds;
+
+    if (!initialLoaded && connectedList.length > 0) {
+      // First load: fetch all
       loadAllBuckets();
+    } else if (newIds.length > 0) {
+      // Incremental: only load buckets for newly connected providers
+      (async () => {
+        setLoading(true);
+        try {
+          await Promise.allSettled(
+            newIds.map(async (conn) => {
+              try {
+                const result = await S3Service.listBuckets(conn.id);
+                setBucketsForConnection(conn.id, result);
+              } catch (error: any) {
+                console.error(`Failed to load buckets for ${conn.displayName}:`, error);
+              }
+            })
+          );
+        } finally {
+          setLoading(false);
+        }
+      })();
     }
-  }, [connectedList.length]); // Intentionally only re-run when count changes
+  }, [connectedList]); // Re-run when connected list changes
 
   // ── Create bucket ──────────────────────────────────────────────────────
 
   const openCreateDialog = React.useCallback((connectionId: string) => {
     setCreateForConnectionId(connectionId);
     setNewBucketName('');
+    setCreateError('');
     setShowCreateDialog(true);
   }, []);
 
   const handleCreateBucket = React.useCallback(async () => {
     if (!newBucketName.trim() || !createForConnectionId) return;
     setIsCreating(true);
+    setCreateError('');
     try {
       await S3Service.createBucket(createForConnectionId, newBucketName.trim());
       setNewBucketName('');
@@ -232,7 +306,7 @@ export default function BucketIndexScreen() {
       const result = await S3Service.listBuckets(createForConnectionId);
       setBucketsForConnection(createForConnectionId, result);
     } catch (error: any) {
-      console.error('Failed to create bucket:', error);
+      setCreateError(error.message || 'Failed to create bucket');
     } finally {
       setIsCreating(false);
     }
@@ -245,15 +319,54 @@ export default function BucketIndexScreen() {
     [router]
   );
 
-  // ── No connections at all ──────────────────────────────────────────────
+  // ── Delete bucket ──────────────────────────────────────────────────────
 
+  const handleDeleteBucket = React.useCallback((bucket: BucketInfo) => {
+    setDeleteBucketTarget(bucket);
+  }, []);
+
+  const confirmDeleteBucket = React.useCallback(async () => {
+    if (!deleteBucketTarget) return;
+    setIsDeletingBucket(true);
+    try {
+      await S3Service.deleteBucket(deleteBucketTarget.connectionId, deleteBucketTarget.name);
+      // Refresh bucket list for that connection
+      const result = await S3Service.listBuckets(deleteBucketTarget.connectionId);
+      setBucketsForConnection(deleteBucketTarget.connectionId, result);
+      setDeleteBucketTarget(null);
+    } catch (error: any) {
+      Alert.alert(
+        'Delete Failed',
+        error.message || 'Failed to delete bucket. Make sure the bucket is empty.'
+      );
+      setIsDeletingBucket(false);
+    } finally {
+      setIsDeletingBucket(false);
+    }
+  }, [deleteBucketTarget, setBucketsForConnection]);
+
+  // ── No connections at all ──────────────────────────────────────────────
+  // Show skeleton while store is still loading from SecureStore
+  if (isInitializing) {
+    return (
+      <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+        <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
+          <Icon as={DatabaseIcon} className="text-foreground size-6" />
+          <Text className="text-foreground text-xl font-bold">Buckets</Text>
+        </View>
+        <Separator />
+        <BucketListSkeleton />
+      </View>
+    );
+  }
   if (!hasAnyConnection) {
     return (
       <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
-        <View className="flex-row items-center gap-2 px-6 pt-4 pb-2">
-          <Icon as={DatabaseIcon} className="text-foreground size-5" />
-          <Text className="text-foreground text-lg font-semibold">Buckets</Text>
+        <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
+          <Icon as={DatabaseIcon} className="text-foreground size-6" />
+          <Text className="text-foreground text-xl font-bold">Buckets</Text>
         </View>
+        <Separator />
         <EmptyState
           icon={WifiOffIcon}
           title="No Connections"
@@ -265,13 +378,28 @@ export default function BucketIndexScreen() {
 
   // ── No connected providers ─────────────────────────────────────────────
 
+  // If some connections are still connecting, show skeleton instead of 'Not Connected'
+  if (connectedList.length === 0 && activeOrConnectingList.length > 0) {
+    return (
+      <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+        <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
+          <Icon as={DatabaseIcon} className="text-foreground size-6" />
+          <Text className="text-foreground text-xl font-bold">Buckets</Text>
+        </View>
+        <Separator />
+        <BucketListSkeleton />
+      </View>
+    );
+  }
+
   if (connectedList.length === 0) {
     return (
       <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
-        <View className="flex-row items-center gap-2 px-6 pt-4 pb-2">
-          <Icon as={DatabaseIcon} className="text-foreground size-5" />
-          <Text className="text-foreground text-lg font-semibold">Buckets</Text>
+        <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
+          <Icon as={DatabaseIcon} className="text-foreground size-6" />
+          <Text className="text-foreground text-xl font-bold">Buckets</Text>
         </View>
+        <Separator />
         <EmptyState
           icon={WifiOffIcon}
           title="Not Connected"
@@ -288,25 +416,17 @@ export default function BucketIndexScreen() {
       {/* Header */}
       <View className="px-6 pt-4 pb-3">
         <View className="flex-row items-center justify-between">
-          <View className="flex-row items-center gap-2">
-            <Icon as={DatabaseIcon} className="text-foreground size-5" />
-            <Text className="text-foreground text-lg font-semibold">Buckets</Text>
+          <View className="flex-row items-center gap-2.5">
+            <Icon as={DatabaseIcon} className="text-foreground size-6" />
+            <Text className="text-foreground text-xl font-bold">Buckets</Text>
           </View>
-          <View className="flex-row items-center gap-1">
-            <Badge variant="outline">
-              <Text className="text-xs">
-                {connectedList.length} provider{connectedList.length > 1 ? 's' : ''} ·{' '}
-                {totalBuckets} bucket{totalBuckets !== 1 ? 's' : ''}
-              </Text>
-            </Badge>
-            <Pressable onPress={loadAllBuckets} className="active:bg-accent rounded-md p-2">
-              <Icon as={RefreshCwIcon} className="text-muted-foreground size-4" />
-            </Pressable>
-          </View>
+          <Pressable onPress={loadAllBuckets} className="active:bg-accent rounded-md p-2">
+            <Icon as={RefreshCwIcon} className="text-muted-foreground size-4" />
+          </Pressable>
         </View>
       </View>
 
-      <Separator className="mx-4" />
+      <Separator />
 
       {/* Grouped Bucket Sections */}
       <ScrollView
@@ -327,10 +447,11 @@ export default function BucketIndexScreen() {
             <ProviderSectionCard
               key={section.connection.id}
               section={section}
-              collapsed={collapsedIds.has(section.connection.id)}
+              collapsed={collapsedIds === 'all' || collapsedIds.has(section.connection.id)}
               onToggle={() => toggleCollapse(section.connection.id)}
               onBucketPress={handleBucketPress}
               onCreateBucket={openCreateDialog}
+              onDeleteBucket={handleDeleteBucket}
             />
           ))
         )}
@@ -349,11 +470,19 @@ export default function BucketIndexScreen() {
               <Input
                 placeholder="my-new-bucket"
                 value={newBucketName}
-                onChangeText={setNewBucketName}
+                onChangeText={(text) => {
+                  setNewBucketName(text);
+                  if (createError) setCreateError('');
+                }}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
             </View>
+            {createError ? (
+              <View className="bg-destructive/10 rounded-lg p-3">
+                <Text className="text-destructive text-sm">{createError}</Text>
+              </View>
+            ) : null}
           </View>
           <DialogFooter>
             <Button variant="outline" onPress={() => setShowCreateDialog(false)}>
@@ -369,6 +498,41 @@ export default function BucketIndexScreen() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Bucket Confirmation */}
+      <AlertDialog
+        open={deleteBucketTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteBucketTarget(null);
+            setIsDeletingBucket(false);
+          }
+        }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Bucket</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete "{deleteBucketTarget?.name}"? The bucket must be empty. This action cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onPress={() => {
+                setDeleteBucketTarget(null);
+                setIsDeletingBucket(false);
+              }}>
+              <Text>Cancel</Text>
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onPress={confirmDeleteBucket}
+              disabled={isDeletingBucket}>
+              <Text>{isDeletingBucket ? 'Deleting...' : 'Delete'}</Text>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </View>
   );
 }

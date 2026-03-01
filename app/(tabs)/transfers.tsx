@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
+import { Separator } from '@/components/ui/separator';
 import { TransferItem } from '@/components/transfer-item';
 import { EmptyState } from '@/components/empty-state';
 import { useTransferStore } from '@/lib/stores/transfer-store';
@@ -24,7 +25,7 @@ const TABS: { value: TransferFilter; label: string; shortLabel: string }[] = [
   { value: 'completed', label: 'Completed', shortLabel: 'Done' },
 ];
 
-const SPRING_CONFIG = { damping: 18, stiffness: 200 };
+const SPRING_CONFIG = { damping: 16, stiffness: 160 };
 
 function AnimatedTab({
   label,
@@ -85,10 +86,14 @@ export default function TransfersScreen() {
   return (
     <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
       {/* Header */}
-      <View className="flex-row items-center gap-2 px-6 pt-4 pb-2">
-        <Icon as={ArrowLeftRightIcon} className="text-foreground size-6" />
-        <Text className="text-foreground text-lg font-semibold">Transfers</Text>
+      <View className="px-6 pt-4 pb-3">
+        <View className="flex-row items-center gap-2.5">
+          <Icon as={ArrowLeftRightIcon} className="text-foreground size-6" />
+          <Text className="text-foreground text-xl font-bold">Transfers</Text>
+        </View>
       </View>
+
+      <Separator />
 
       {/* Filter Tabs */}
       <View className="bg-muted mx-4 my-2 flex-row gap-1 rounded-lg p-0.75">

@@ -20,6 +20,8 @@ interface SavedConnection {
 
 interface ConnectionState {
   connections: S3Connection[];
+  /** true until the first loadConnections() call finishes */
+  isInitializing: boolean;
 
   /** Boot: load from storage → auto-connect all */
   loadConnections: () => Promise<void>;
@@ -48,6 +50,7 @@ interface ConnectionState {
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
   connections: [],
+  isInitializing: true,
 
   _setStatus: (id, status, error) =>
     set((state) => ({
@@ -107,14 +110,18 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
           ...s,
           status: 'disconnected' as ConnectionStatus,
         }));
-        set({ connections });
+        // Show connections immediately (with connecting shimmer)
+        set({ connections, isInitializing: false });
 
         // Auto-connect all in parallel
         await Promise.allSettled(
           connections.map((c) => get().connectOne(c.id))
         );
+      } else {
+        set({ isInitializing: false });
       }
     } catch {
+      set({ isInitializing: false });
       // ignore parse/load errors
     }
   },

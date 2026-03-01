@@ -42,9 +42,11 @@ function isImageExt(name: string): boolean {
 interface ObjectItemProps {
   object: S3Object;
   isSelected: boolean;
+  selectionMode: boolean;
   thumbnailUrl?: string | null;
   onPress: () => void;
   onToggle: () => void;
+  onLongPress?: () => void;
 }
 
 function ImageThumbnail({ url }: { url: string }) {
@@ -72,18 +74,23 @@ function ImageThumbnail({ url }: { url: string }) {
 export const ObjectItem = React.memo(function ObjectItem({
   object,
   isSelected,
+  selectionMode,
   thumbnailUrl,
   onPress,
   onToggle,
+  onLongPress,
 }: ObjectItemProps) {
   if (object.isFolder) {
+    // Strip trailing slash from folder display name
+    const folderName = object.name.replace(/\/$/, '');
     return (
       <Pressable
         onPress={onPress}
+        onLongPress={onLongPress}
         className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
-        <View className="w-6" />
+        {selectionMode && <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />}
         <Icon as={FolderIcon} className="text-muted-foreground size-5" />
-        <Text className="text-foreground flex-1">{object.name}</Text>
+        <Text className="text-foreground flex-1">{folderName}</Text>
         <Text className="text-muted-foreground w-20 text-right text-xs">-</Text>
       </Pressable>
     );
@@ -93,8 +100,11 @@ export const ObjectItem = React.memo(function ObjectItem({
   const showThumbnail = isImageExt(object.name) && thumbnailUrl;
 
   return (
-    <Pressable onPress={onPress} className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
-      <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
+      {selectionMode && <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />}
       {showThumbnail ? (
         <ImageThumbnail url={thumbnailUrl} />
       ) : (

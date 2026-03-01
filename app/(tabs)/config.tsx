@@ -39,6 +39,9 @@ import {
   ClipboardPasteIcon,
   CheckIcon,
   ShareIcon,
+  SunIcon,
+  MoonIcon,
+  SettingsIcon,
 } from 'lucide-react-native';
 
 import * as React from 'react';
@@ -52,7 +55,14 @@ import {
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as FileSystem from 'expo-file-system/legacy';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withSequence,
+} from 'react-native-reanimated';
+import { Uniwind, useUniwind } from 'uniwind';
+import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
@@ -210,6 +220,7 @@ function parseImportPayload(json: string): ExportPayload {
 
 export default function ConfigScreen() {
   const insets = useSafeAreaInsets();
+  const { theme } = useUniwind();
   const { connections, addConnection, updateConnection, removeConnection, connectOne } =
     useConnectionStore();
 
@@ -240,6 +251,20 @@ export default function ConfigScreen() {
   const [isImporting, setIsImporting] = React.useState(false);
   const [importResult, setImportResult] = React.useState<string | null>(null);
   const [copiedExport, setCopiedExport] = React.useState(false);
+
+  const themeScale = useSharedValue(1);
+
+  const themeIconStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: themeScale.value }],
+  }));
+
+  const toggleTheme = React.useCallback(() => {
+    themeScale.value = withSequence(
+      withSpring(0.6, { damping: 12, stiffness: 300 }),
+      withSpring(1, { damping: 10, stiffness: 180 })
+    );
+    Uniwind.setTheme(theme === 'dark' ? 'light' : 'dark');
+  }, [theme, themeScale]);
 
   const provider = getProvider(formConfig.provider);
 
@@ -318,7 +343,15 @@ export default function ConfigScreen() {
     setIsDiscovering(true);
     setDiscoverError('');
     try {
-      const bucketNames = await S3Service.discoverBuckets(formConfig);
+      // Trim credentials to avoid "malformed access key id" errors from copy-paste whitespace
+      const trimmedConfig = {
+        ...formConfig,
+        accessKeyId: formConfig.accessKeyId.trim(),
+        secretAccessKey: formConfig.secretAccessKey.trim(),
+        accountId: formConfig.accountId?.trim(),
+        endpointUrl: formConfig.endpointUrl.trim(),
+      };
+      const bucketNames = await S3Service.discoverBuckets(trimmedConfig);
       setDiscoveredBuckets(bucketNames);
       // If editing and visibleBuckets was set, keep those selections;
       // otherwise pre-select all discovered buckets
@@ -368,9 +401,18 @@ export default function ConfigScreen() {
     }
     const name = displayName.trim() || provider.label;
 
+    // Trim all credential fields to avoid whitespace issues
+    const trimmedConfig: S3Config = {
+      ...formConfig,
+      accessKeyId: formConfig.accessKeyId.trim(),
+      secretAccessKey: formConfig.secretAccessKey.trim(),
+      accountId: formConfig.accountId?.trim(),
+      endpointUrl: formConfig.endpointUrl.trim(),
+    };
+
     // Include visible buckets selection if user has discovered buckets
     const configToSave: S3Config = {
-      ...formConfig,
+      ...trimmedConfig,
       visibleBuckets:
         discoveredBuckets.length > 0 && selectedBuckets.size < discoveredBuckets.length
           ? Array.from(selectedBuckets)
@@ -416,8 +458,10 @@ export default function ConfigScreen() {
       const payload = buildExportPayload(connections);
       const json = JSON.stringify(payload, null, 2);
       const fileName = `s3man-config-${new Date().toISOString().slice(0, 10)}.json`;
-      const fileUri = FileSystem.documentDirectory + fileName;
-      await FileSystem.writeAsStringAsync(fileUri, json);
+      const file = new File(Paths.cache, fileName);
+      file.create({ overwrite: true });
+      file.write(json);
+      const fileUri = file.uri;
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
         await Sharing.shareAsync(fileUri, {
@@ -464,7 +508,8 @@ export default function ConfigScreen() {
         return;
       }
       const fileUri = result.assets[0].uri;
-      const json = await FileSystem.readAsStringAsync(fileUri);
+      const response = await fetch(fileUri);
+      const json = await response.text();
       const payload = parseImportPayload(json);
       let imported = 0;
       for (const entry of payload.connections) {
@@ -538,11 +583,11 @@ export default function ConfigScreen() {
           contentContainerClassName="p-6 pb-12"
           keyboardShouldPersistTaps="handled">
           {/* Form Header */}
-          <View className="mb-4 flex-row items-center gap-2">
+          <View className="mb-4 flex-row items-center gap-2.5">
             <Pressable onPress={handleCancel} className="rounded-md p-1">
-              <Icon as={XIcon} className="text-foreground size-5" />
+              <Icon as={XIcon} className="text-foreground size-6" />
             </Pressable>
-            <Text className="text-foreground flex-1 text-lg font-semibold">
+            <Text className="text-foreground flex-1 text-xl font-bold">
               {editingId ? 'Edit Connection' : 'New Connection'}
             </Text>
           </View>
@@ -674,7 +719,7 @@ export default function ConfigScreen() {
                 formConfig.provider === 'cloudflare-r2'
                   ? 'R2 Access Key ID'
                   : formConfig.provider === 'backblaze-b2'
-                    ? 'B2 Application Key ID'
+                    ? 'B2 Master Application Key ID'
                     : 'AKIAIOSFODNN7EXAMPLE'
               }
               value={formConfig.accessKeyId}
@@ -682,6 +727,12 @@ export default function ConfigScreen() {
               autoCapitalize="none"
               autoCorrect={false}
             />
+            {formConfig.provider === 'backblaze-b2' && (
+              <Text className="text-muted-foreground text-xs">
+                Use Master Application Key ID to access all buckets. Find in B2 Cloud Storage → App
+                Keys.
+              </Text>
+            )}
           </View>
 
           {/* Secret Access Key */}
@@ -692,7 +743,7 @@ export default function ConfigScreen() {
                 className="flex-1 rounded-r-none"
                 placeholder={
                   formConfig.provider === 'backblaze-b2'
-                    ? 'B2 Application Key'
+                    ? 'B2 Master Application Key'
                     : 'Enter your secret key'
                 }
                 value={formConfig.secretAccessKey}
@@ -710,6 +761,11 @@ export default function ConfigScreen() {
                 />
               </Pressable>
             </View>
+            {formConfig.provider === 'backblaze-b2' && (
+              <Text className="text-muted-foreground text-xs">
+                The Master Application Key is only shown once when created. Save it securely.
+              </Text>
+            )}
           </View>
 
           {/* Region */}
@@ -764,8 +820,9 @@ export default function ConfigScreen() {
             </View>
 
             <Text className="text-muted-foreground -mt-1 text-xs">
-              Fetch available buckets to choose which ones to show. Leave all selected to show
-              everything.
+              {formConfig.provider === 'backblaze-b2'
+                ? 'Use Master Application Key to list all buckets. Select which ones to add.'
+                : 'Fetch available buckets to choose which ones to show. Leave all selected to show everything.'}
             </Text>
 
             <Button
@@ -837,8 +894,8 @@ export default function ConfigScreen() {
               {isSaving ? (
                 <ActivityIndicator size="small" color="white" />
               ) : (
-                <Text className="text-primary-foreground font-semibold">
-                  {editingId ? 'Save & Reconnect' : 'Connect'}
+                <Text className="text-primary-foreground font-semibold" numberOfLines={1}>
+                  {editingId ? 'Save' : 'Reconnect'}
                 </Text>
               )}
             </Button>
@@ -852,22 +909,34 @@ export default function ConfigScreen() {
 
   return (
     <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
-      <ScrollView className="flex-1" contentContainerClassName="p-6 pb-12">
-        {/* Page Header */}
-        <View className="mb-6 flex-row items-center justify-between">
-          <View className="mr-3 flex-1">
-            <Text className="text-foreground text-2xl font-bold">Connections</Text>
-            <Text className="text-muted-foreground mt-1 text-sm">
-              Manage your S3-compatible storage providers
-            </Text>
+      {/* Page Header */}
+      <View className="px-6 pt-4 pb-3">
+        <View className="flex-row items-center justify-between">
+          <View className="mr-3 flex-1 flex-row items-center gap-2.5">
+            <Icon as={SettingsIcon} className="text-foreground size-6" />
+            <Text className="text-foreground text-xl font-bold">Connections</Text>
           </View>
-          <Badge variant="secondary" className="shrink-0">
-            <Text>
-              {connectedCount}/{connections.length}
-            </Text>
-          </Badge>
+          <View className="flex-row items-center gap-2">
+            <Pressable onPress={toggleTheme} className="active:bg-accent rounded-lg p-2">
+              <Animated.View style={themeIconStyle}>
+                <Icon
+                  as={theme === 'dark' ? SunIcon : MoonIcon}
+                  className="text-muted-foreground size-5"
+                />
+              </Animated.View>
+            </Pressable>
+            <Badge variant="secondary" className="shrink-0">
+              <Text>
+                {connectedCount}/{connections.length}
+              </Text>
+            </Badge>
+          </View>
         </View>
+      </View>
 
+      <Separator />
+
+      <ScrollView className="flex-1" contentContainerClassName="px-6 pb-12 pt-3">
         {/* Connection List */}
         {connections.length === 0 ? (
           <View className="border-border bg-card items-center rounded-xl border py-16">

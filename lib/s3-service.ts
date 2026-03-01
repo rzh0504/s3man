@@ -3,6 +3,7 @@ import {
   ListBucketsCommand,
   ListObjectsV2Command,
   CreateBucketCommand,
+  DeleteBucketCommand,
   DeleteObjectsCommand,
   PutObjectCommand,
   GetObjectCommand,
@@ -20,6 +21,14 @@ import {
   presignedUrlCacheKey,
   invalidateBucketCache,
 } from '@/lib/cache';
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/** Strip whitespace AND invisible Unicode chars (zero-width spaces, BOM, etc.) from credentials */
+function sanitize(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\s\u00A0\u200B-\u200D\uFEFF\u2060\u180E\u0000-\u001F]/g, '');
+}
 
 // ── Multi-client registry ──────────────────────────────────────────────────
 
@@ -46,8 +55,8 @@ export function createClientForConnection(connectionId: string, config: S3Config
   const clientConfig: S3ClientConfig = {
     region: config.provider === 'cloudflare-r2' ? 'auto' : config.region || 'us-east-1',
     credentials: {
-      accessKeyId: config.accessKeyId,
-      secretAccessKey: config.secretAccessKey,
+      accessKeyId: sanitize(config.accessKeyId),
+      secretAccessKey: sanitize(config.secretAccessKey),
     },
     forcePathStyle: true,
   };
@@ -93,8 +102,8 @@ export async function discoverBuckets(config: S3Config): Promise<string[]> {
   const clientConfig: S3ClientConfig = {
     region: config.provider === 'cloudflare-r2' ? 'auto' : config.region || 'us-east-1',
     credentials: {
-      accessKeyId: config.accessKeyId,
-      secretAccessKey: config.secretAccessKey,
+      accessKeyId: sanitize(config.accessKeyId),
+      secretAccessKey: sanitize(config.secretAccessKey),
     },
     forcePathStyle: true,
   };
@@ -167,6 +176,11 @@ export async function createBucket(connectionId: string, name: string, region?: 
   }
 
   await client.send(new CreateBucketCommand(params));
+}
+
+export async function deleteBucket(connectionId: string, name: string): Promise<void> {
+  const { client } = getClientEntry(connectionId);
+  await client.send(new DeleteBucketCommand({ Bucket: name }));
 }
 
 export async function listObjects(
@@ -266,12 +280,15 @@ export async function uploadObject(
 ): Promise<void> {
   const { client } = getClientEntry(connectionId);
 
+  const contentLength = typeof body === 'string' ? Buffer.byteLength(body) : body.byteLength;
+
   await client.send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: key,
       Body: body,
       ContentType: contentType,
+      ContentLength: contentLength,
     })
   );
 }
@@ -432,4 +449,76 @@ export function isPreviewable(fileName: string): boolean {
 /** Check if a file is an image */
 export function isImageFile(fileName: string): boolean {
   return guessMimeType(fileName).startsWith('image/');
+}
+
+/** Create an empty object (used to create "folders" in S3) */
+export async function putEmptyObject(
+  connectionId: string,
+  bucket: string,
+  key: string
+): Promise<void> {
+  const { client } = getClientEntry(connectionId);
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: '',
+      ContentType: 'application/x-directory',
+      ContentLength: 0,
+    })
+  );
+}
+
+/**
+ * Recursively delete a folder and all objects under it.
+ * Lists all objects with the folder prefix, then deletes them in batches.
+ */
+export async function deleteFolderRecursive(
+  connectionId: string,
+  bucket: string,
+  prefix: string
+): Promise<void> {
+  const { client } = getClientEntry(connectionId);
+
+  // List ALL objects under this prefix (no delimiter — get everything recursively)
+  let continuationToken: string | undefined;
+  const allKeys: string[] = [];
+
+  do {
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
+    );
+
+    if (response.Contents) {
+      for (const obj of response.Contents) {
+        if (obj.Key) allKeys.push(obj.Key);
+      }
+    }
+
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  // Also include the folder marker itself
+  if (!allKeys.includes(prefix)) {
+    allKeys.push(prefix);
+  }
+
+  // Delete in batches of 1000 (S3 limit)
+  for (let i = 0; i < allKeys.length; i += 1000) {
+    const batch = allKeys.slice(i, i + 1000);
+    await client.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: {
+          Objects: batch.map((Key) => ({ Key })),
+        },
+      })
+    );
+  }
+
+  invalidateBucketCache(connectionId, bucket);
 }
