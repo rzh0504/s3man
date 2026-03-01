@@ -3,7 +3,7 @@ import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import type { BucketInfo } from '@/lib/types';
 import { formatDate } from '@/lib/constants';
-import { FolderIcon, AlertTriangleIcon } from 'lucide-react-native';
+import { FolderIcon } from 'lucide-react-native';
 import React from 'react';
 import { View, Pressable } from 'react-native';
 
@@ -17,9 +17,7 @@ export const BucketItem = React.memo(function BucketItem({ bucket, onPress }: Bu
     <Pressable
       onPress={onPress}
       className="border-border active:bg-accent flex-row items-center gap-3 border-b px-4 py-3 last:border-b-0">
-      <View className="bg-muted size-9 items-center justify-center rounded-lg">
-        <Icon as={FolderIcon} className="text-muted-foreground size-4" />
-      </View>
+      <Icon as={FolderIcon} className="text-muted-foreground size-5" />
       <View className="flex-1 gap-0.5">
         <Text className="text-foreground text-sm font-medium">{bucket.name}</Text>
         <Text className="text-muted-foreground text-xs">

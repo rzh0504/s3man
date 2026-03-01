@@ -2,7 +2,7 @@
   "expo": {
     "name": "S3Man",
     "slug": "s3man",
-    "version": "1.0.0",
+    "version": "1.1.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "s3man",

@@ -20,14 +20,11 @@ import { useConnectionStore } from '@/lib/stores/connection-store';
 import * as S3Service from '@/lib/s3-service';
 import { PROVIDERS, getProvider, getRegionLabel, buildEndpointUrl } from '@/lib/constants';
 import type { S3Config, S3Connection, S3Provider } from '@/lib/types';
+import { ProviderIcon } from '@/components/provider-icons';
 import {
   EyeIcon,
   EyeOffIcon,
   ChevronDownIcon,
-  CloudIcon,
-  HardDriveIcon,
-  ServerIcon,
-  BoxIcon,
   PlusIcon,
   TrashIcon,
   PencilIcon,
@@ -43,7 +40,7 @@ import {
   CheckIcon,
   ShareIcon,
 } from 'lucide-react-native';
-import type { LucideIcon } from 'lucide-react-native';
+
 import * as React from 'react';
 import {
   View,
@@ -59,13 +56,6 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
-
-const PROVIDER_ICONS: Record<S3Provider, LucideIcon> = {
-  'cloudflare-r2': CloudIcon,
-  'backblaze-b2': HardDriveIcon,
-  'aws-s3': ServerIcon,
-  custom: BoxIcon,
-};
 
 const DEFAULT_CONFIG: S3Config = {
   provider: 'cloudflare-r2',
@@ -90,7 +80,6 @@ function ConnectionCard({
   onReconnect: () => void;
 }) {
   const providerInfo = getProvider(conn.config.provider);
-  const ProviderIcon = PROVIDER_ICONS[conn.config.provider];
 
   const statusColor =
     conn.status === 'connected'
@@ -113,9 +102,7 @@ function ConnectionCard({
   return (
     <View className="border-border bg-card rounded-xl border p-4">
       <View className="flex-row items-center gap-3">
-        <View className="bg-muted h-10 w-10 items-center justify-center rounded-lg">
-          <Icon as={ProviderIcon} className="text-foreground size-5" />
-        </View>
+        <ProviderIcon provider={conn.config.provider} size={28} />
         <View className="flex-1">
           <Text className="text-foreground text-base font-semibold" numberOfLines={1}>
             {conn.displayName}
@@ -585,7 +572,7 @@ export default function ConfigScreen() {
               onPress={() => setShowProviderPicker(!showProviderPicker)}
               className="border-input bg-background dark:bg-input/30 flex-row items-center justify-between rounded-md border px-3 py-2.5">
               <View className="flex-1 flex-row items-center gap-2">
-                <Icon as={PROVIDER_ICONS[formConfig.provider]} className="text-foreground size-5" />
+                <ProviderIcon provider={formConfig.provider} size={20} />
                 <View className="flex-1">
                   <Text className="text-foreground text-sm font-medium">{provider.label}</Text>
                   <Text className="text-muted-foreground text-xs" numberOfLines={1}>
@@ -605,7 +592,7 @@ export default function ConfigScreen() {
                     className={`flex-row items-center gap-3 px-3 py-3 ${
                       formConfig.provider === p.key ? 'bg-accent' : ''
                     }`}>
-                    <Icon as={PROVIDER_ICONS[p.key]} className="text-foreground size-5" />
+                    <ProviderIcon provider={p.key} size={20} />
                     <View className="flex-1">
                       <Text
                         className={`text-sm ${

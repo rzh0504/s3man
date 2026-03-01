@@ -20,19 +20,15 @@ import { useBucketStore } from '@/lib/stores/bucket-store';
 import * as S3Service from '@/lib/s3-service';
 import { getProvider } from '@/lib/constants';
 import type { BucketInfo, S3Connection } from '@/lib/types';
+import { ProviderIcon } from '@/components/provider-icons';
 import {
   FolderIcon,
   PlusIcon,
   WifiOffIcon,
   DatabaseIcon,
-  CloudIcon,
-  HardDriveIcon,
-  ServerIcon,
-  BoxIcon,
   RefreshCwIcon,
   ChevronRightIcon,
 } from 'lucide-react-native';
-import type { LucideIcon } from 'lucide-react-native';
 import type { S3Provider } from '@/lib/types';
 import * as React from 'react';
 import { View, ScrollView, RefreshControl, ActivityIndicator, Pressable } from 'react-native';
@@ -40,13 +36,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, withTiming } from 'react-native-reanimated';
-
-const PROVIDER_ICONS: Record<S3Provider, LucideIcon> = {
-  'cloudflare-r2': CloudIcon,
-  'backblaze-b2': HardDriveIcon,
-  'aws-s3': ServerIcon,
-  custom: BoxIcon,
-};
 
 interface ProviderSection {
   connection: S3Connection;
@@ -87,7 +76,6 @@ function ProviderSectionCard({
 }) {
   const conn = section.connection;
   const providerInfo = getProvider(conn.config.provider);
-  const ProvIcon = PROVIDER_ICONS[conn.config.provider];
 
   const chevronStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: withTiming(collapsed ? '0deg' : '90deg', { duration: 200 }) }],
@@ -102,9 +90,7 @@ function ProviderSectionCard({
         <Animated.View style={chevronStyle}>
           <Icon as={ChevronRightIcon} className="text-muted-foreground size-4" />
         </Animated.View>
-        <View className="bg-muted size-8 items-center justify-center rounded-lg">
-          <Icon as={ProvIcon} className="text-foreground size-4" />
-        </View>
+        <ProviderIcon provider={conn.config.provider} size={22} />
         <View className="flex-1">
           <Text className="text-foreground text-sm font-semibold" numberOfLines={1}>
             {conn.displayName}
