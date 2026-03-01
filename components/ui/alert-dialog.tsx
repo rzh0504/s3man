@@ -1,8 +1,9 @@
-import { buttonTextVariants, buttonVariants } from '@/components/ui/button';
+import { buttonTextVariants, buttonVariants, type ButtonProps } from '@/components/ui/button';
 import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
 import { TextClassContext } from '@/components/ui/text';
 import { cn } from '@/lib/utils';
 import * as AlertDialogPrimitive from '@rn-primitives/alert-dialog';
+import type { VariantProps } from 'class-variance-authority';
 import * as React from 'react';
 import { Platform, View, type ViewProps } from 'react-native';
 import { FadeIn, FadeOut } from 'react-native-reanimated';
@@ -28,7 +29,7 @@ function AlertDialogOverlay({
     <FullWindowOverlay>
       <AlertDialogPrimitive.Overlay
         className={cn(
-          'absolute bottom-0 left-0 right-0 top-0 z-50 flex items-center justify-center bg-black/50 p-2',
+          'absolute top-0 right-0 bottom-0 left-0 z-50 flex items-center justify-center bg-black/50 p-2',
           Platform.select({
             web: 'animate-in fade-in-0 fixed',
           }),
@@ -113,25 +114,38 @@ function AlertDialogDescription({
   );
 }
 
+type AlertDialogButtonVariants = Pick<VariantProps<typeof buttonVariants>, 'variant' | 'size'>;
+
 function AlertDialogAction({
   className,
+  variant,
+  size,
   ...props
-}: AlertDialogPrimitive.ActionProps & React.RefAttributes<AlertDialogPrimitive.ActionRef>) {
+}: AlertDialogPrimitive.ActionProps &
+  React.RefAttributes<AlertDialogPrimitive.ActionRef> &
+  AlertDialogButtonVariants) {
   return (
-    <TextClassContext.Provider value={buttonTextVariants({ className })}>
-      <AlertDialogPrimitive.Action className={cn(buttonVariants(), className)} {...props} />
+    <TextClassContext.Provider value={buttonTextVariants({ variant, size })}>
+      <AlertDialogPrimitive.Action
+        className={cn(buttonVariants({ variant, size }), className)}
+        {...props}
+      />
     </TextClassContext.Provider>
   );
 }
 
 function AlertDialogCancel({
   className,
+  variant = 'outline',
+  size,
   ...props
-}: AlertDialogPrimitive.CancelProps & React.RefAttributes<AlertDialogPrimitive.CancelRef>) {
+}: AlertDialogPrimitive.CancelProps &
+  React.RefAttributes<AlertDialogPrimitive.CancelRef> &
+  AlertDialogButtonVariants) {
   return (
-    <TextClassContext.Provider value={buttonTextVariants({ className, variant: 'outline' })}>
+    <TextClassContext.Provider value={buttonTextVariants({ variant, size })}>
       <AlertDialogPrimitive.Cancel
-        className={cn(buttonVariants({ variant: 'outline' }), className)}
+        className={cn(buttonVariants({ variant, size }), className)}
         {...props}
       />
     </TextClassContext.Provider>

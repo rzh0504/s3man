@@ -13,9 +13,22 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { S3Config, BucketInfo, S3Object } from '@/lib/types';
 import { getProvider, buildEndpointUrl } from '@/lib/constants';
+import {
+  objectListCache,
+  presignedUrlCache,
+  objectListCacheKey,
+  presignedUrlCacheKey,
+  invalidateBucketCache,
+} from '@/lib/cache';
 
-let s3Client: S3Client | null = null;
-let currentConfig: S3Config | null = null;
+// ── Multi-client registry ──────────────────────────────────────────────────
+
+interface ClientEntry {
+  client: S3Client;
+  config: S3Config;
+}
+
+const clientMap = new Map<string, ClientEntry>();
 
 /** Resolve the endpoint URL: use explicit override or build from provider/region/accountId */
 function resolveEndpoint(config: S3Config): string {
@@ -23,11 +36,14 @@ function resolveEndpoint(config: S3Config): string {
   return buildEndpointUrl(config.provider, config.region, config.accountId);
 }
 
-export function createS3Client(config: S3Config): S3Client {
+/** Create and register an S3 client for a given connection ID */
+export function createClientForConnection(connectionId: string, config: S3Config): S3Client {
+  // Destroy existing client for this ID if any
+  destroyClientForConnection(connectionId);
+
   const endpoint = resolveEndpoint(config);
 
   const clientConfig: S3ClientConfig = {
-    // R2 requires region "auto"; B2 uses its own region format; both work fine here
     region: config.provider === 'cloudflare-r2' ? 'auto' : config.region || 'us-east-1',
     credentials: {
       accessKeyId: config.accessKeyId,
@@ -40,43 +56,72 @@ export function createS3Client(config: S3Config): S3Client {
     clientConfig.endpoint = endpoint;
   }
 
-  s3Client = new S3Client(clientConfig);
-  currentConfig = config;
-  return s3Client;
+  const client = new S3Client(clientConfig);
+  clientMap.set(connectionId, { client, config });
+  return client;
 }
 
-export function getS3Client(): S3Client | null {
-  return s3Client;
+/** Get a registered client/config for a connection */
+export function getClientEntry(connectionId: string): ClientEntry {
+  const entry = clientMap.get(connectionId);
+  if (!entry) throw new Error(`No S3 client for connection: ${connectionId}`);
+  return entry;
 }
 
-export function getCurrentConfig(): S3Config | null {
-  return currentConfig;
-}
-
-export function destroyS3Client(): void {
-  if (s3Client) {
-    s3Client.destroy();
-    s3Client = null;
-    currentConfig = null;
+/** Destroy and unregister a client */
+export function destroyClientForConnection(connectionId: string): void {
+  const entry = clientMap.get(connectionId);
+  if (entry) {
+    entry.client.destroy();
+    clientMap.delete(connectionId);
   }
 }
 
-export async function testConnection(config: S3Config): Promise<boolean> {
-  const client = createS3Client(config);
+/** Destroy all clients */
+export function destroyAllClients(): void {
+  for (const [id] of clientMap) {
+    destroyClientForConnection(id);
+  }
+}
+
+/**
+ * Discover buckets using raw credentials (no registered connection needed).
+ * Creates a temporary client, lists buckets, then destroys it.
+ */
+export async function discoverBuckets(config: S3Config): Promise<string[]> {
+  const endpoint = resolveEndpoint(config);
+  const clientConfig: S3ClientConfig = {
+    region: config.provider === 'cloudflare-r2' ? 'auto' : config.region || 'us-east-1',
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+    forcePathStyle: true,
+  };
+  if (endpoint) {
+    clientConfig.endpoint = endpoint;
+  }
+
+  const client = new S3Client(clientConfig);
   try {
-    await client.send(new ListBucketsCommand({}));
-    return true;
-  } catch (error) {
-    destroyS3Client();
-    throw error;
+    const response = await client.send(new ListBucketsCommand({}));
+    return (response.Buckets ?? []).map((b) => b.Name ?? '').filter(Boolean);
+  } finally {
+    client.destroy();
   }
 }
 
-export async function listBuckets(): Promise<BucketInfo[]> {
-  const client = getS3Client();
-  const config = getCurrentConfig();
-  if (!client || !config) throw new Error('S3 client not initialized');
+// ── Connection-level operations ────────────────────────────────────────────
 
+/** Test connectivity for a given connection ID (client must already be created) */
+export async function testConnectionById(connectionId: string): Promise<boolean> {
+  const { client } = getClientEntry(connectionId);
+  await client.send(new ListBucketsCommand({}));
+  return true;
+}
+
+export async function listBuckets(connectionId: string): Promise<BucketInfo[]> {
+  const { client, config } = getClientEntry(connectionId);
   const provider = getProvider(config.provider);
   const response = await client.send(new ListBucketsCommand({}));
   const buckets: BucketInfo[] = [];
@@ -85,7 +130,6 @@ export async function listBuckets(): Promise<BucketInfo[]> {
     for (const bucket of response.Buckets) {
       let region: string | undefined;
 
-      // Only query bucket location if the provider supports it (AWS S3 does; R2 and B2 don't)
       if (provider.supportsBucketLocation) {
         try {
           const locResponse = await client.send(
@@ -96,7 +140,6 @@ export async function listBuckets(): Promise<BucketInfo[]> {
           region = undefined;
         }
       } else {
-        // For R2/B2 the region comes from the connection config
         region = config.region;
       }
 
@@ -104,6 +147,7 @@ export async function listBuckets(): Promise<BucketInfo[]> {
         name: bucket.Name ?? '',
         creationDate: bucket.CreationDate?.toISOString(),
         region,
+        connectionId,
       });
     }
   }
@@ -111,14 +155,11 @@ export async function listBuckets(): Promise<BucketInfo[]> {
   return buckets;
 }
 
-export async function createBucket(name: string, region?: string): Promise<void> {
-  const client = getS3Client();
-  const config = getCurrentConfig();
-  if (!client || !config) throw new Error('S3 client not initialized');
+export async function createBucket(connectionId: string, name: string, region?: string): Promise<void> {
+  const { client, config } = getClientEntry(connectionId);
 
   const params: any = { Bucket: name };
 
-  // Only set LocationConstraint for AWS S3
   if (config.provider === 'aws-s3' && region && region !== 'us-east-1') {
     params.CreateBucketConfiguration = {
       LocationConstraint: region,
@@ -129,11 +170,16 @@ export async function createBucket(name: string, region?: string): Promise<void>
 }
 
 export async function listObjects(
+  connectionId: string,
   bucket: string,
   prefix: string = ''
 ): Promise<S3Object[]> {
-  const client = getS3Client();
-  if (!client) throw new Error('S3 client not initialized');
+  // Check cache first
+  const cacheKey = objectListCacheKey(connectionId, bucket, prefix);
+  const cached = objectListCache.get(cacheKey);
+  if (cached) return cached;
+
+  const { client } = getClientEntry(connectionId);
 
   const response = await client.send(
     new ListObjectsV2Command({
@@ -145,7 +191,6 @@ export async function listObjects(
 
   const objects: S3Object[] = [];
 
-  // Add folders (common prefixes)
   if (response.CommonPrefixes) {
     for (const cp of response.CommonPrefixes) {
       if (cp.Prefix) {
@@ -159,7 +204,6 @@ export async function listObjects(
     }
   }
 
-  // Add files
   if (response.Contents) {
     for (const obj of response.Contents) {
       if (obj.Key && obj.Key !== prefix) {
@@ -177,15 +221,28 @@ export async function listObjects(
     }
   }
 
+  // Cache for 60 seconds
+  objectListCache.set(cacheKey, objects, 60);
   return objects;
 }
 
+/** Force-refresh listObjects bypassing cache */
+export async function listObjectsFresh(
+  connectionId: string,
+  bucket: string,
+  prefix: string = ''
+): Promise<S3Object[]> {
+  const cacheKey = objectListCacheKey(connectionId, bucket, prefix);
+  objectListCache.delete(cacheKey);
+  return listObjects(connectionId, bucket, prefix);
+}
+
 export async function deleteObjects(
+  connectionId: string,
   bucket: string,
   keys: string[]
 ): Promise<void> {
-  const client = getS3Client();
-  if (!client) throw new Error('S3 client not initialized');
+  const { client } = getClientEntry(connectionId);
 
   await client.send(
     new DeleteObjectsCommand({
@@ -195,17 +252,19 @@ export async function deleteObjects(
       },
     })
   );
+
+  // Invalidate object list cache for this bucket after deletion
+  invalidateBucketCache(connectionId, bucket);
 }
 
-// Simplified upload for text/JSON based content (used primarily on web)
 export async function uploadObject(
+  connectionId: string,
   bucket: string,
   key: string,
   body: Uint8Array | string,
   contentType?: string
 ): Promise<void> {
-  const client = getS3Client();
-  if (!client) throw new Error('S3 client not initialized');
+  const { client } = getClientEntry(connectionId);
 
   await client.send(
     new PutObjectCommand({
@@ -217,10 +276,8 @@ export async function uploadObject(
   );
 }
 
-export async function getObjectUrl(bucket: string, key: string): Promise<string> {
-  const client = getS3Client();
-  const config = getCurrentConfig();
-  if (!client || !config) throw new Error('S3 client not initialized');
+export async function getObjectUrl(connectionId: string, bucket: string, key: string): Promise<string> {
+  const { config } = getClientEntry(connectionId);
 
   const endpoint = resolveEndpoint(config);
   if (endpoint) {
@@ -231,26 +288,76 @@ export async function getObjectUrl(bucket: string, key: string): Promise<string>
 
 /** Generate a presigned URL (valid for `expiresIn` seconds, default 1 hour) */
 export async function getPresignedUrl(
+  connectionId: string,
   bucket: string,
   key: string,
   expiresIn = 3600
 ): Promise<string> {
-  const client = getS3Client();
-  if (!client) throw new Error('S3 client not initialized');
+  // Check cache — use slightly shorter TTL than the actual URL expiry
+  const cacheKey = presignedUrlCacheKey(connectionId, bucket, key);
+  const cached = presignedUrlCache.get(cacheKey);
+  if (cached) return cached;
 
+  const { client } = getClientEntry(connectionId);
   const command = new GetObjectCommand({ Bucket: bucket, Key: key });
-  return getSignedUrl(client, command, { expiresIn });
+  const url = await getSignedUrl(client, command, { expiresIn });
+
+  // Cache for 80% of the URL's lifetime (e.g. 1h URL → 48 min cache)
+  presignedUrlCache.set(cacheKey, url, Math.floor(expiresIn * 0.8));
+  return url;
+}
+
+/**
+ * Batch-generate presigned URLs in parallel.
+ * Returns a map of objectKey → presigned URL.
+ * Uses the cache so repeated calls are fast.
+ */
+export async function batchGetPresignedUrls(
+  connectionId: string,
+  bucket: string,
+  keys: string[],
+  expiresIn = 1800
+): Promise<Record<string, string>> {
+  const CONCURRENCY = 6;
+  const result: Record<string, string> = {};
+
+  // Fill from cache first; collect uncached keys
+  const uncached: string[] = [];
+  for (const key of keys) {
+    const cacheKey = presignedUrlCacheKey(connectionId, bucket, key);
+    const cached = presignedUrlCache.get(cacheKey);
+    if (cached) {
+      result[key] = cached;
+    } else {
+      uncached.push(key);
+    }
+  }
+
+  // Generate remaining in batches of CONCURRENCY
+  for (let i = 0; i < uncached.length; i += CONCURRENCY) {
+    const batch = uncached.slice(i, i + CONCURRENCY);
+    const urls = await Promise.allSettled(
+      batch.map((k) => getPresignedUrl(connectionId, bucket, k, expiresIn))
+    );
+    urls.forEach((settled, idx) => {
+      if (settled.status === 'fulfilled') {
+        result[batch[idx]] = settled.value;
+      }
+    });
+  }
+
+  return result;
 }
 
 /** Get presigned URL for uploading (PUT) */
 export async function getPresignedUploadUrl(
+  connectionId: string,
   bucket: string,
   key: string,
   contentType?: string,
   expiresIn = 3600
 ): Promise<string> {
-  const client = getS3Client();
-  if (!client) throw new Error('S3 client not initialized');
+  const { client } = getClientEntry(connectionId);
 
   const command = new PutObjectCommand({
     Bucket: bucket,

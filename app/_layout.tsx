@@ -17,11 +17,11 @@ export {
 
 export default function RootLayout() {
   const { theme } = useUniwind();
-  const loadConfig = useConnectionStore((s) => s.loadConfig);
+  const loadConnections = useConnectionStore((s) => s.loadConnections);
 
   useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
+    loadConnections();
+  }, [loadConnections]);
 
   return (
     <ThemeProvider value={NAV_THEME[(theme ?? 'light') as keyof typeof NAV_THEME]}>

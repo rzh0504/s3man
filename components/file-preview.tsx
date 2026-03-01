@@ -4,23 +4,17 @@ import { Button } from '@/components/ui/button';
 import { formatBytes } from '@/lib/constants';
 import { isImageFile } from '@/lib/s3-service';
 import type { S3Object } from '@/lib/types';
-import { XIcon, DownloadIcon, ExternalLinkIcon } from 'lucide-react-native';
+import { Skeleton } from '@/components/ui/skeleton';
+import { XIcon, DownloadIcon, ExternalLinkIcon, LinkIcon } from 'lucide-react-native';
 import * as React from 'react';
-import {
-  View,
-  Modal,
-  Pressable,
-  Image,
-  ScrollView,
-  ActivityIndicator,
-  Dimensions,
-} from 'react-native';
+import { View, Modal, Pressable, Image, ScrollView, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface FilePreviewProps {
   visible: boolean;
   onClose: () => void;
   onDownload: () => void;
+  onCopyLink?: () => void;
   object: S3Object | null;
   previewUrl: string | null;
   textContent: string | null;
@@ -33,6 +27,7 @@ export function FilePreview({
   visible,
   onClose,
   onDownload,
+  onCopyLink,
   object,
   previewUrl,
   textContent,
@@ -60,18 +55,40 @@ export function FilePreview({
               <Text className="text-muted-foreground text-xs">{formatBytes(object.size)}</Text>
             )}
           </View>
-          <Pressable onPress={onDownload} className="rounded-md p-1">
-            <Icon as={DownloadIcon} className="text-foreground size-6" />
-          </Pressable>
+          <View className="flex-row items-center gap-1">
+            {onCopyLink && (
+              <Pressable onPress={onCopyLink} className="rounded-md p-1">
+                <Icon as={LinkIcon} className="text-foreground size-5" />
+              </Pressable>
+            )}
+            <Pressable onPress={onDownload} className="rounded-md p-1">
+              <Icon as={DownloadIcon} className="text-foreground size-6" />
+            </Pressable>
+          </View>
         </View>
 
         {/* Content */}
         <View className="flex-1 items-center justify-center">
           {isLoading ? (
-            <View className="items-center gap-3">
-              <ActivityIndicator size="large" />
-              <Text className="text-muted-foreground text-sm">Loading preview...</Text>
-            </View>
+            isImage ? (
+              <View className="items-center justify-center p-4">
+                <Skeleton
+                  className="rounded-lg"
+                  style={{ width: SCREEN_WIDTH - 32, height: SCREEN_WIDTH - 32 }}
+                />
+              </View>
+            ) : (
+              <View className="w-full flex-1 p-4">
+                <Skeleton className="mb-3 h-5 w-2/3 rounded" />
+                <Skeleton className="mb-2 h-4 w-full rounded" />
+                <Skeleton className="mb-2 h-4 w-full rounded" />
+                <Skeleton className="mb-2 h-4 w-5/6 rounded" />
+                <Skeleton className="mb-2 h-4 w-full rounded" />
+                <Skeleton className="mb-2 h-4 w-3/4 rounded" />
+                <Skeleton className="mb-2 h-4 w-full rounded" />
+                <Skeleton className="h-4 w-1/2 rounded" />
+              </View>
+            )
           ) : isImage && previewUrl ? (
             <ScrollView
               className="flex-1"

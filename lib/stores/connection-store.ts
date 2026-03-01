@@ -1,57 +1,66 @@
 import { create } from 'zustand';
-import type { ConnectionStatus, S3Config } from '@/lib/types';
-import { DEFAULT_ENDPOINT, DEFAULT_REGION, DEFAULT_PROVIDER } from '@/lib/constants';
+import type { S3Connection, S3Config, ConnectionStatus } from '@/lib/types';
+import { DEFAULT_PROVIDER, DEFAULT_REGION } from '@/lib/constants';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import * as S3Service from '@/lib/s3-service';
 
-const STORAGE_KEY = 's3man_config';
+const STORAGE_KEY = 's3man_connections';
 
-interface ConnectionState {
-  config: S3Config;
-  status: ConnectionStatus;
-  errorMessage: string;
-  setConfig: (config: Partial<S3Config>) => void;
-  setStatus: (status: ConnectionStatus, error?: string) => void;
-  saveConfig: () => Promise<void>;
-  loadConfig: () => Promise<void>;
-  clearConfig: () => Promise<void>;
+function generateId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
-const DEFAULT_CONFIG: S3Config = {
-  provider: DEFAULT_PROVIDER,
-  endpointUrl: DEFAULT_ENDPOINT,
-  accessKeyId: '',
-  secretAccessKey: '',
-  region: DEFAULT_REGION,
-  accountId: '',
-};
+/** Serialisable shape persisted to SecureStore (no runtime status) */
+interface SavedConnection {
+  id: string;
+  displayName: string;
+  config: S3Config;
+}
+
+interface ConnectionState {
+  connections: S3Connection[];
+
+  /** Boot: load from storage → auto-connect all */
+  loadConnections: () => Promise<void>;
+
+  /** Add a brand-new connection (tests first, auto-saves) */
+  addConnection: (displayName: string, config: S3Config) => Promise<void>;
+
+  /** Update an existing connection's config (re-tests, auto-saves) */
+  updateConnection: (id: string, displayName: string, config: S3Config) => Promise<void>;
+
+  /** Remove a connection (destroys client, auto-saves) */
+  removeConnection: (id: string) => Promise<void>;
+
+  /** Reconnect a single connection */
+  connectOne: (id: string) => Promise<void>;
+
+  /** Disconnect a single connection */
+  disconnectOne: (id: string) => void;
+
+  /** Convenience: current number of connected providers */
+  connectedCount: () => number;
+
+  /** Internal: update status of one connection */
+  _setStatus: (id: string, status: ConnectionStatus, error?: string) => void;
+}
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
-  config: { ...DEFAULT_CONFIG },
-  status: 'disconnected',
-  errorMessage: '',
+  connections: [],
 
-  setConfig: (partial) =>
+  _setStatus: (id, status, error) =>
     set((state) => ({
-      config: { ...state.config, ...partial },
+      connections: state.connections.map((c) =>
+        c.id === id ? { ...c, status, errorMessage: error } : c
+      ),
     })),
 
-  setStatus: (status, error) =>
-    set({ status, errorMessage: error ?? '' }),
+  connectedCount: () => get().connections.filter((c) => c.status === 'connected').length,
 
-  saveConfig: async () => {
-    const { config } = get();
-    const json = JSON.stringify(config);
-    if (Platform.OS === 'web') {
-      try {
-        localStorage.setItem(STORAGE_KEY, json);
-      } catch {}
-    } else {
-      await SecureStore.setItemAsync(STORAGE_KEY, json);
-    }
-  },
+  // ── Persistence ──────────────────────────────────────────────────────────
 
-  loadConfig: async () => {
+  loadConnections: async () => {
     try {
       let json: string | null = null;
       if (Platform.OS === 'web') {
@@ -59,26 +68,143 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       } else {
         json = await SecureStore.getItemAsync(STORAGE_KEY);
       }
+
+      if (!json) {
+        // Migrate from old single-config key
+        const legacyJson = Platform.OS === 'web'
+          ? localStorage.getItem('s3man_config')
+          : await SecureStore.getItemAsync('s3man_config');
+
+        if (legacyJson) {
+          const legacyConfig = JSON.parse(legacyJson) as S3Config;
+          const migrated: SavedConnection = {
+            id: generateId(),
+            displayName: legacyConfig.provider === 'cloudflare-r2' ? 'Cloudflare R2' :
+              legacyConfig.provider === 'backblaze-b2' ? 'Backblaze B2' :
+              legacyConfig.provider === 'aws-s3' ? 'Amazon S3' : 'Custom S3',
+            config: {
+              provider: legacyConfig.provider ?? DEFAULT_PROVIDER,
+              endpointUrl: legacyConfig.endpointUrl ?? '',
+              accessKeyId: legacyConfig.accessKeyId ?? '',
+              secretAccessKey: legacyConfig.secretAccessKey ?? '',
+              region: legacyConfig.region ?? DEFAULT_REGION,
+              accountId: legacyConfig.accountId ?? '',
+            },
+          };
+          json = JSON.stringify([migrated]);
+          // Clean up legacy key
+          if (Platform.OS === 'web') {
+            localStorage.removeItem('s3man_config');
+          } else {
+            await SecureStore.deleteItemAsync('s3man_config');
+          }
+        }
+      }
+
       if (json) {
-        const saved = JSON.parse(json);
-        // Merge with defaults to ensure new fields exist
-        set({ config: { ...DEFAULT_CONFIG, ...saved } });
+        const saved: SavedConnection[] = JSON.parse(json);
+        const connections: S3Connection[] = saved.map((s) => ({
+          ...s,
+          status: 'disconnected' as ConnectionStatus,
+        }));
+        set({ connections });
+
+        // Auto-connect all in parallel
+        await Promise.allSettled(
+          connections.map((c) => get().connectOne(c.id))
+        );
       }
     } catch {
-      // ignore parse errors
+      // ignore parse/load errors
     }
   },
 
-  clearConfig: async () => {
-    if (Platform.OS === 'web') {
-      localStorage.removeItem(STORAGE_KEY);
-    } else {
-      await SecureStore.deleteItemAsync(STORAGE_KEY);
+  addConnection: async (displayName, config) => {
+    const id = generateId();
+    const conn: S3Connection = {
+      id,
+      displayName,
+      config,
+      status: 'connecting',
+    };
+    set((state) => ({ connections: [...state.connections, conn] }));
+
+    try {
+      S3Service.createClientForConnection(id, config);
+      await S3Service.testConnectionById(id);
+      get()._setStatus(id, 'connected');
+    } catch (error: any) {
+      get()._setStatus(id, 'error', error.message || 'Connection failed');
+      throw error;
+    } finally {
+      await _persist(get().connections);
     }
-    set({
-      config: { ...DEFAULT_CONFIG },
-      status: 'disconnected',
-      errorMessage: '',
-    });
+  },
+
+  updateConnection: async (id, displayName, config) => {
+    // Destroy old client
+    S3Service.destroyClientForConnection(id);
+
+    set((state) => ({
+      connections: state.connections.map((c) =>
+        c.id === id ? { ...c, displayName, config, status: 'connecting', errorMessage: undefined } : c
+      ),
+    }));
+
+    try {
+      S3Service.createClientForConnection(id, config);
+      await S3Service.testConnectionById(id);
+      get()._setStatus(id, 'connected');
+    } catch (error: any) {
+      get()._setStatus(id, 'error', error.message || 'Connection failed');
+      throw error;
+    } finally {
+      await _persist(get().connections);
+    }
+  },
+
+  removeConnection: async (id) => {
+    S3Service.destroyClientForConnection(id);
+    set((state) => ({
+      connections: state.connections.filter((c) => c.id !== id),
+    }));
+    await _persist(get().connections);
+  },
+
+  connectOne: async (id) => {
+    const conn = get().connections.find((c) => c.id === id);
+    if (!conn) return;
+
+    get()._setStatus(id, 'connecting');
+    try {
+      S3Service.createClientForConnection(id, conn.config);
+      await S3Service.testConnectionById(id);
+      get()._setStatus(id, 'connected');
+    } catch (error: any) {
+      get()._setStatus(id, 'error', error.message || 'Connection failed');
+    }
+  },
+
+  disconnectOne: (id) => {
+    S3Service.destroyClientForConnection(id);
+    get()._setStatus(id, 'disconnected');
   },
 }));
+
+// ── Internal persistence helper ──────────────────────────────────────────
+
+async function _persist(connections: S3Connection[]): Promise<void> {
+  const saved: SavedConnection[] = connections.map((c) => ({
+    id: c.id,
+    displayName: c.displayName,
+    config: c.config,
+  }));
+  const json = JSON.stringify(saved);
+  if (Platform.OS === 'web') {
+    try {
+      localStorage.setItem(STORAGE_KEY, json);
+    } catch {}
+  } else {
+    await SecureStore.setItemAsync(STORAGE_KEY, json);
+  }
+}

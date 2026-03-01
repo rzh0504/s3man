@@ -16,10 +16,12 @@ export const BucketItem = React.memo(function BucketItem({ bucket, onPress }: Bu
   return (
     <Pressable
       onPress={onPress}
-      className="border-border active:bg-accent flex-row items-center gap-3 border-b px-6 py-4">
-      <Icon as={FolderIcon} className="text-muted-foreground size-6" />
-      <View className="flex-1 gap-1">
-        <Text className="text-foreground text-base font-medium">{bucket.name}</Text>
+      className="border-border active:bg-accent flex-row items-center gap-3 border-b px-4 py-3 last:border-b-0">
+      <View className="bg-muted size-9 items-center justify-center rounded-lg">
+        <Icon as={FolderIcon} className="text-muted-foreground size-4" />
+      </View>
+      <View className="flex-1 gap-0.5">
+        <Text className="text-foreground text-sm font-medium">{bucket.name}</Text>
         <Text className="text-muted-foreground text-xs">
           Created {formatDate(bucket.creationDate)}
         </Text>

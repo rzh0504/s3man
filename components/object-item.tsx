@@ -1,6 +1,7 @@
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { S3Object } from '@/lib/types';
 import { formatBytes, getFileExtension } from '@/lib/constants';
 import {
@@ -13,7 +14,7 @@ import {
   FileCodeIcon,
 } from 'lucide-react-native';
 import React from 'react';
-import { View, Pressable } from 'react-native';
+import { View, Pressable, Image } from 'react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
 function getFileIcon(name: string): LucideIcon {
@@ -32,16 +33,46 @@ function getFileIcon(name: string): LucideIcon {
   return FileIcon;
 }
 
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'];
+
+function isImageExt(name: string): boolean {
+  return IMAGE_EXTS.includes(getFileExtension(name));
+}
+
 interface ObjectItemProps {
   object: S3Object;
   isSelected: boolean;
+  thumbnailUrl?: string | null;
   onPress: () => void;
   onToggle: () => void;
+}
+
+function ImageThumbnail({ url }: { url: string }) {
+  const [loaded, setLoaded] = React.useState(false);
+  const [error, setError] = React.useState(false);
+
+  if (error) {
+    return <Icon as={ImageIcon} className="text-muted-foreground size-8" />;
+  }
+
+  return (
+    <View className="size-8 items-center justify-center overflow-hidden rounded">
+      {!loaded && <Skeleton className="absolute size-8 rounded" />}
+      <Image
+        source={{ uri: url }}
+        className="size-8 rounded"
+        resizeMode="cover"
+        onLoad={() => setLoaded(true)}
+        onError={() => setError(true)}
+      />
+    </View>
+  );
 }
 
 export const ObjectItem = React.memo(function ObjectItem({
   object,
   isSelected,
+  thumbnailUrl,
   onPress,
   onToggle,
 }: ObjectItemProps) {
@@ -59,11 +90,16 @@ export const ObjectItem = React.memo(function ObjectItem({
   }
 
   const FileIconComponent = getFileIcon(object.name);
+  const showThumbnail = isImageExt(object.name) && thumbnailUrl;
 
   return (
     <Pressable onPress={onPress} className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
       <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />
-      <Icon as={FileIconComponent} className="text-muted-foreground size-5" />
+      {showThumbnail ? (
+        <ImageThumbnail url={thumbnailUrl} />
+      ) : (
+        <Icon as={FileIconComponent} className="text-muted-foreground size-5" />
+      )}
       <Text className="text-foreground flex-1" numberOfLines={1}>
         {object.name}
       </Text>

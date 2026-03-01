@@ -1,7 +1,7 @@
 // S3 兼容服务提供商
 export type S3Provider = 'cloudflare-r2' | 'backblaze-b2' | 'aws-s3' | 'custom';
 
-// S3 连接配置
+// S3 连接配置（纯凭证，不含运行时状态）
 export interface S3Config {
   provider: S3Provider;
   endpointUrl: string;
@@ -10,16 +10,29 @@ export interface S3Config {
   region: string;
   // Cloudflare R2 specific
   accountId?: string;
+  /** If set, only these buckets are shown on the index. Empty = show all. */
+  visibleBuckets?: string[];
 }
 
 // 连接状态
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+// 完整连接（config + 运行时信息）
+export interface S3Connection {
+  id: string;
+  displayName: string;
+  config: S3Config;
+  status: ConnectionStatus;
+  errorMessage?: string;
+}
 
 // Bucket 信息
 export interface BucketInfo {
   name: string;
   creationDate?: string;
   region?: string;
+  /** 所属连接 ID */
+  connectionId: string;
 }
 
 // S3 对象
@@ -48,6 +61,8 @@ export interface TransferTask {
   transferredBytes: number;
   bucket: string;
   key: string;
+  /** 所属连接 ID */
+  connectionId: string;
   localPath?: string;
   error?: string;
   startedAt: string;
