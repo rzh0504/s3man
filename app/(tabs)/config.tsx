@@ -58,8 +58,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  withSpring,
+  withTiming,
   withSequence,
+  Easing,
 } from 'react-native-reanimated';
 import { Uniwind, useUniwind } from 'uniwind';
 import { File, Paths } from 'expo-file-system';
@@ -260,8 +261,8 @@ export default function ConfigScreen() {
 
   const toggleTheme = React.useCallback(() => {
     themeScale.value = withSequence(
-      withSpring(0.6, { damping: 12, stiffness: 300 }),
-      withSpring(1, { damping: 10, stiffness: 180 })
+      withTiming(0.65, { duration: 80, easing: Easing.out(Easing.quad) }),
+      withTiming(1, { duration: 180, easing: Easing.out(Easing.back(3)) })
     );
     Uniwind.setTheme(theme === 'dark' ? 'light' : 'dark');
   }, [theme, themeScale]);

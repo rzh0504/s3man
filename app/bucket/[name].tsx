@@ -205,8 +205,8 @@ export default function ObjectBrowserScreen() {
     async (forceRefresh = false) => {
       if (!bucketName || !connectionId) return;
 
-      // If objects already present (from store prefix cache), mark as loaded immediately
-      const hasStoreCache = objects.length > 0;
+      // Read from live store (not stale closure) to check prefix-cache hit
+      const hasStoreCache = useObjectStore.getState().objects.length > 0;
 
       // Stale-while-revalidate: show cached data instantly, then refresh in background
       if (!forceRefresh) {
