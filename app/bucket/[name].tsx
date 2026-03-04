@@ -352,9 +352,16 @@ export default function ObjectBrowserScreen() {
       if (!bucketName || !connectionId) return;
       setPreviewObject(obj);
       setPreviewVisible(true);
-      setPreviewLoading(true);
       setPreviewUrl(null);
       setPreviewText(null);
+
+      // Non-previewable files — show info sheet with download immediately
+      if (!S3Service.isPreviewable(obj.name)) {
+        setPreviewLoading(false);
+        return;
+      }
+
+      setPreviewLoading(true);
 
       try {
         const url = await S3Service.getPresignedUrl(connectionId, bucketName, obj.key);
@@ -616,12 +623,10 @@ export default function ObjectBrowserScreen() {
       } else if (selectionMode) {
         // In selection mode, tap toggles selection
         toggleSelection(obj.key);
-      } else if (S3Service.isPreviewable(obj.name)) {
-        handlePreview(obj);
       } else {
-        // Non-previewable file outside selection mode — enter selection mode
-        setSelectionMode(true);
-        toggleSelection(obj.key);
+        // Always open preview sheet — FilePreview handles non-previewable files
+        // with a "download" button & file info
+        handlePreview(obj);
       }
     },
     [handleFolderPress, handlePreview, toggleSelection, selectionMode]

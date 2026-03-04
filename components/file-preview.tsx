@@ -7,7 +7,8 @@ import type { S3Object } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { XIcon, DownloadIcon, ExternalLinkIcon, LinkIcon } from 'lucide-react-native';
 import * as React from 'react';
-import { View, Modal, Pressable, Image, ScrollView, Dimensions } from 'react-native';
+import { View, Modal, Pressable, Image, ScrollView, Dimensions, Platform } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
@@ -87,7 +88,13 @@ export function FilePreview({
     <Modal visible={modalVisible} animationType="none" transparent statusBarTranslucent>
       {/* Backdrop */}
       <Animated.View style={[{ flex: 1 }, backdropStyle]}>
-        <Pressable className="flex-1 bg-black/40" onPress={onClose} />
+        <Pressable className="flex-1" onPress={onClose}>
+          {Platform.OS === 'ios' ? (
+            <BlurView intensity={40} tint="dark" style={{ flex: 1 }} />
+          ) : (
+            <View className="flex-1 bg-black/40" />
+          )}
+        </Pressable>
       </Animated.View>
 
       {/* Sheet */}

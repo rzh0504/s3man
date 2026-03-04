@@ -33,7 +33,7 @@ function getFileIcon(name: string): LucideIcon {
   return FileIcon;
 }
 
-const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'];
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico'];
 
 function isImageExt(name: string): boolean {
   return IMAGE_EXTS.includes(getFileExtension(name));
