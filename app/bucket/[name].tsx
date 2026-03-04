@@ -649,41 +649,43 @@ export default function ObjectBrowserScreen() {
     clearSelection();
   }, [clearSelection]);
 
-  // ── Unified back handler: selection mode → folder up → pop screen ────
+  // ── Unified back handler: preview → selection mode → folder up → pop screen
   //
   // Priority:
-  //   1. Exit selection mode (if active)
-  //   2. Go up one folder level (if inside a sub-folder)
-  //   3. Let the default navigation happen (pop to bucket list)
-  //
-  // We always intercept when there is something to "undo" so that
-  // swipe-back / hardware-back feel like a logical "go up" action.
+  //   1. Close preview sheet (if open)
+  //   2. Exit selection mode (if active)
+  //   3. Go up one folder level (if inside a sub-folder)
+  //   4. Let the default navigation happen (pop to bucket list)
 
-  const shouldInterceptBack = selectionMode || currentPrefix !== '';
+  const shouldInterceptBack = previewVisible || selectionMode || currentPrefix !== '';
 
   React.useEffect(() => {
     if (!shouldInterceptBack) return;
 
     // Android hardware back button
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (selectionMode) {
+      if (previewVisible) {
+        setPreviewVisible(false);
+      } else if (selectionMode) {
         exitSelectionMode();
       } else if (currentPrefix !== '') {
         handleGoUp();
       }
-      return true; // prevent default back navigation
+      return true;
     });
 
     // iOS swipe-back gesture & header back button
     const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
-      if (selectionMode) {
+      if (previewVisible) {
+        e.preventDefault();
+        setPreviewVisible(false);
+      } else if (selectionMode) {
         e.preventDefault();
         exitSelectionMode();
       } else if (currentPrefix !== '') {
         e.preventDefault();
         handleGoUp();
       }
-      // else: allow default — pops the screen
     });
 
     return () => {
@@ -692,6 +694,7 @@ export default function ObjectBrowserScreen() {
     };
   }, [
     shouldInterceptBack,
+    previewVisible,
     selectionMode,
     currentPrefix,
     exitSelectionMode,
