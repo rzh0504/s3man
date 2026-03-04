@@ -50,7 +50,7 @@ import {
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
-import { Paths, Directory, File as FSFile } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import type { S3Object, TransferTask } from '@/lib/types';
 import { Progress } from '@/components/ui/progress';
@@ -406,15 +406,16 @@ export default function ObjectBrowserScreen() {
         const url = await S3Service.getPresignedUrl(connectionId, bucketName, obj.key);
 
         // Ensure download directory exists
-        const downloadDir = new Directory(Paths.document, 's3downloads');
-        if (!downloadDir.exists) {
-          downloadDir.create({ intermediates: true });
+        const downloadDir = FileSystem.documentDirectory + 's3downloads/';
+        const dirInfo = await FileSystem.getInfoAsync(downloadDir);
+        if (!dirInfo.exists) {
+          await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
         }
 
-        const destFile = new FSFile(downloadDir, obj.name);
+        const destUri = downloadDir + obj.name;
         updateTask(taskId, { progress: 10 });
 
-        const downloadResult = await FSFile.downloadFileAsync(url, destFile, { idempotent: true });
+        const downloadResult = await FileSystem.downloadAsync(url, destUri);
 
         updateTask(taskId, {
           progress: 100,
@@ -569,13 +570,11 @@ export default function ObjectBrowserScreen() {
             }
           }, interval);
 
-          // 3. Stream file to presigned URL via fetch + Blob (no full arrayBuffer in memory)
-          const fileResponse = await fetch(asset.uri);
-          const blob = await fileResponse.blob();
-          await fetch(presignedUrl, {
-            method: 'PUT',
+          // 3. Upload file to presigned URL via expo-file-system (avoids RN fetch blob issues)
+          await FileSystem.uploadAsync(presignedUrl, asset.uri, {
+            httpMethod: 'PUT',
+            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
             headers: { 'Content-Type': mimeType },
-            body: blob,
           });
 
           // 4. Complete

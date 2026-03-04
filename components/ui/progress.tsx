@@ -70,11 +70,7 @@ function NativeIndicator({ value, className }: IndicatorProps) {
     return null;
   }
 
-  return (
-    <ProgressPrimitive.Indicator asChild>
-      <Animated.View style={indicator} className={cn('bg-foreground h-full', className)} />
-    </ProgressPrimitive.Indicator>
-  );
+  return <Animated.View style={indicator} className={cn('bg-foreground h-full', className)} />;
 }
 
 function NullIndicator(_props: IndicatorProps) {

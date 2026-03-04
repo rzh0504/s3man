@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer';
+globalThis.Buffer = Buffer;
 import 'react-native-get-random-values';
 import '@/global.css';
 

@@ -63,7 +63,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { Uniwind, useUniwind } from 'uniwind';
-import { File, Paths } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
@@ -459,10 +459,8 @@ export default function ConfigScreen() {
       const payload = buildExportPayload(connections);
       const json = JSON.stringify(payload, null, 2);
       const fileName = `s3man-config-${new Date().toISOString().slice(0, 10)}.json`;
-      const file = new File(Paths.cache, fileName);
-      file.create({ overwrite: true });
-      file.write(json);
-      const fileUri = file.uri;
+      const fileUri = FileSystem.cacheDirectory + fileName;
+      await FileSystem.writeAsStringAsync(fileUri, json);
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
         await Sharing.shareAsync(fileUri, {
