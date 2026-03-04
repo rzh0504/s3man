@@ -9,7 +9,6 @@ import { XIcon, DownloadIcon, ExternalLinkIcon, LinkIcon } from 'lucide-react-na
 import * as React from 'react';
 import { View, Modal, Pressable, Image, ScrollView, Dimensions, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
@@ -18,8 +17,6 @@ import Animated, {
   withSpring,
   runOnJS,
   Easing,
-  interpolate,
-  Extrapolation,
 } from 'react-native-reanimated';
 
 interface FilePreviewProps {
@@ -34,7 +31,6 @@ interface FilePreviewProps {
 }
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const DISMISS_THRESHOLD = 120;
 
 export function FilePreview({
   visible,
@@ -48,7 +44,6 @@ export function FilePreview({
 }: FilePreviewProps) {
   const insets = useSafeAreaInsets();
   const translateY = useSharedValue(SCREEN_HEIGHT);
-  const dragY = useSharedValue(0);
   const backdropOpacity = useSharedValue(0);
   const [modalVisible, setModalVisible] = React.useState(false);
 
@@ -56,14 +51,12 @@ export function FilePreview({
     if (visible) {
       setModalVisible(true);
       translateY.value = SCREEN_HEIGHT;
-      dragY.value = 0;
       backdropOpacity.value = 0;
       requestAnimationFrame(() => {
         translateY.value = withSpring(0, { damping: 22, stiffness: 220, mass: 0.8 });
         backdropOpacity.value = withTiming(1, { duration: 250 });
       });
     } else {
-      dragY.value = 0;
       translateY.value = withTiming(
         SCREEN_HEIGHT,
         { duration: 280, easing: Easing.bezier(0.4, 0, 1, 1) },
@@ -75,35 +68,13 @@ export function FilePreview({
     }
   }, [visible]);
 
-  // ── Pan gesture to drag-dismiss the sheet ──────────────────────────────
-  const panGesture = Gesture.Pan()
-    .onUpdate((e) => {
-      // Only allow dragging downward (positive translationY)
-      dragY.value = Math.max(0, e.translationY);
-    })
-    .onEnd((e) => {
-      if (dragY.value > DISMISS_THRESHOLD || e.velocityY > 800) {
-        // Dismiss
-        runOnJS(onClose)();
-      }
-      // Snap back
-      dragY.value = withSpring(0, { damping: 20, stiffness: 300 });
-    });
-
   const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value + dragY.value }],
+    transform: [{ translateY: translateY.value }],
   }));
 
-  const backdropStyle = useAnimatedStyle(() => {
-    // Fade backdrop as user drags down
-    const dragFade = interpolate(
-      dragY.value,
-      [0, DISMISS_THRESHOLD * 2],
-      [1, 0.2],
-      Extrapolation.CLAMP
-    );
-    return { opacity: backdropOpacity.value * dragFade };
-  });
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: backdropOpacity.value,
+  }));
 
   if (!object) return null;
 
@@ -111,8 +82,7 @@ export function FilePreview({
 
   return (
     <Modal visible={modalVisible} animationType="none" transparent statusBarTranslucent>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        {/* Backdrop */}
+      {/* Backdrop */}
         <Animated.View style={[{ flex: 1 }, backdropStyle]}>
           <Pressable className="flex-1" onPress={onClose}>
             {Platform.OS === 'ios' ? (
@@ -138,15 +108,8 @@ export function FilePreview({
           <View
             className="bg-background flex-1 overflow-hidden rounded-t-2xl shadow-2xl shadow-black/30"
             style={{ paddingBottom: insets.bottom }}>
-            {/* Drag handle + Header */}
-            <GestureDetector gesture={panGesture}>
-              <Animated.View>
-                {/* Drag indicator */}
-                <View className="items-center pt-2 pb-0">
-                  <View className="bg-muted-foreground/30 h-1 w-10 rounded-full" />
-                </View>
-                {/* Header */}
-                <View className="border-border flex-row items-center justify-between border-b px-4 py-3">
+            {/* Header */}
+            <View className="border-border flex-row items-center justify-between border-b px-4 py-3">
                   <Pressable onPress={onClose} className="rounded-md p-1">
                     <Icon as={XIcon} className="text-foreground size-6" />
                   </Pressable>
@@ -170,9 +133,7 @@ export function FilePreview({
                       <Icon as={DownloadIcon} className="text-foreground size-6" />
                     </Pressable>
                   </View>
-                </View>
-              </Animated.View>
-            </GestureDetector>
+            </View>
 
             {/* Content */}
             <View className="flex-1 items-center justify-center">
@@ -231,7 +192,6 @@ export function FilePreview({
             </View>
           </View>
         </Animated.View>
-      </GestureHandlerRootView>
     </Modal>
   );
 }
