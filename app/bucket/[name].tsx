@@ -649,27 +649,55 @@ export default function ObjectBrowserScreen() {
     clearSelection();
   }, [clearSelection]);
 
-  // Intercept back gesture / hardware back when in selection mode
+  // ── Unified back handler: selection mode → folder up → pop screen ────
+  //
+  // Priority:
+  //   1. Exit selection mode (if active)
+  //   2. Go up one folder level (if inside a sub-folder)
+  //   3. Let the default navigation happen (pop to bucket list)
+  //
+  // We always intercept when there is something to "undo" so that
+  // swipe-back / hardware-back feel like a logical "go up" action.
+
+  const shouldInterceptBack = selectionMode || currentPrefix !== '';
+
   React.useEffect(() => {
-    if (!selectionMode) return;
+    if (!shouldInterceptBack) return;
 
     // Android hardware back button
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      exitSelectionMode();
+      if (selectionMode) {
+        exitSelectionMode();
+      } else if (currentPrefix !== '') {
+        handleGoUp();
+      }
       return true; // prevent default back navigation
     });
 
-    // iOS swipe-back gesture & navigation back
+    // iOS swipe-back gesture & header back button
     const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
-      e.preventDefault();
-      exitSelectionMode();
+      if (selectionMode) {
+        e.preventDefault();
+        exitSelectionMode();
+      } else if (currentPrefix !== '') {
+        e.preventDefault();
+        handleGoUp();
+      }
+      // else: allow default — pops the screen
     });
 
     return () => {
       backHandler.remove();
       unsubscribe();
     };
-  }, [selectionMode, exitSelectionMode, navigation]);
+  }, [
+    shouldInterceptBack,
+    selectionMode,
+    currentPrefix,
+    exitSelectionMode,
+    handleGoUp,
+    navigation,
+  ]);
 
   const renderItem = React.useCallback(
     ({ item }: { item: S3Object }) => (
@@ -716,6 +744,8 @@ export default function ObjectBrowserScreen() {
           onPress={() => {
             if (selectionMode) {
               exitSelectionMode();
+            } else if (currentPrefix !== '') {
+              handleGoUp();
             } else {
               router.back();
             }
