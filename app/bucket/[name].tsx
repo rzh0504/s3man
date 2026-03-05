@@ -56,6 +56,7 @@ import type { S3Object, TransferTask } from '@/lib/types';
 import { Progress } from '@/components/ui/progress';
 import { invalidateBucketCache } from '@/lib/cache';
 import { useSettingsStore } from '@/lib/stores/settings-store';
+import { useT } from '@/lib/i18n';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -97,6 +98,7 @@ export default function ObjectBrowserScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const t = useT();
   const {
     currentPrefix,
     objects,
@@ -777,7 +779,7 @@ export default function ObjectBrowserScreen() {
           {bucketName}
         </Text>
         <Badge variant="secondary">
-          <Text className="text-xs">{fileCount} files</Text>
+          <Text className="text-xs">{t('bucket.files', { count: fileCount })}</Text>
         </Badge>
       </View>
 
@@ -797,9 +799,11 @@ export default function ObjectBrowserScreen() {
             }}
           />
         )}
-        <Text className="text-muted-foreground flex-1 text-xs font-medium uppercase">File(s)</Text>
+        <Text className="text-muted-foreground flex-1 text-xs font-medium uppercase">
+          {t('bucket.fileHeader')}
+        </Text>
         <Text className="text-muted-foreground w-16 text-right text-xs font-medium uppercase">
-          Size
+          {t('bucket.sizeHeader')}
         </Text>
       </View>
 
@@ -835,8 +839,8 @@ export default function ObjectBrowserScreen() {
           ) : (
             <EmptyState
               icon={FolderIcon}
-              title="Empty"
-              description="This location has no objects."
+              title={t('bucket.empty')}
+              description={t('bucket.emptyDesc')}
             />
           )
         }
@@ -851,7 +855,10 @@ export default function ObjectBrowserScreen() {
             <View className="flex-row items-center gap-2">
               <Icon as={UploadIcon} className="text-primary size-4" />
               <Text className="text-foreground text-sm font-medium">
-                Uploading {uploadProgress.completed}/{uploadProgress.total}
+                {t('bucket.uploadingProgress', {
+                  completed: uploadProgress.completed,
+                  total: uploadProgress.total,
+                })}
               </Text>
             </View>
             <Text className="text-foreground text-sm font-semibold">
@@ -876,8 +883,12 @@ export default function ObjectBrowserScreen() {
           style={{ paddingBottom: Math.max(insets.bottom, 12) }}>
           <View className="flex-row items-center justify-between">
             <View>
-              <Text className="text-foreground text-sm font-medium">{selectedCount} selected</Text>
-              <Text className="text-muted-foreground text-xs">{fileCount} Objects</Text>
+              <Text className="text-foreground text-sm font-medium">
+                {t('bucket.selectedCount', { count: selectedCount })}
+              </Text>
+              <Text className="text-muted-foreground text-xs">
+                {t('bucket.objectCount', { count: fileCount })}
+              </Text>
             </View>
             <View className="flex-row gap-2">
               <Button variant="ghost" size="icon" onPress={handleDelete} className="size-10">
@@ -888,7 +899,7 @@ export default function ObjectBrowserScreen() {
                 onPress={handlePull}
                 className="flex-row items-center gap-2">
                 <Icon as={DownloadIcon} className="text-foreground size-4" />
-                <Text>Download</Text>
+                <Text>{t('bucket.download')}</Text>
               </Button>
             </View>
           </View>
@@ -901,7 +912,7 @@ export default function ObjectBrowserScreen() {
           className="absolute right-0 bottom-0 left-0 items-center"
           style={{ paddingBottom: Math.max(insets.bottom, 8) }}
           pointerEvents="none">
-          <Text className="text-muted-foreground/60 text-xs">long press to select</Text>
+          <Text className="text-muted-foreground/60 text-xs">{t('bucket.longPressHint')}</Text>
         </View>
       )}
 
@@ -931,7 +942,9 @@ export default function ObjectBrowserScreen() {
                 className="bg-secondary active:bg-secondary/80 flex-row items-center gap-2 rounded-full px-4 shadow-lg shadow-black/25"
                 style={{ height: 44 }}>
                 <Icon as={UploadIcon} className="text-secondary-foreground size-5" />
-                <Text className="text-secondary-foreground text-sm font-medium">Upload</Text>
+                <Text className="text-secondary-foreground text-sm font-medium">
+                  {t('bucket.upload')}
+                </Text>
               </Pressable>
               <Pressable
                 onPress={() => {
@@ -943,7 +956,9 @@ export default function ObjectBrowserScreen() {
                 className="bg-secondary active:bg-secondary/80 flex-row items-center gap-2 rounded-full px-4 shadow-lg shadow-black/25"
                 style={{ height: 44 }}>
                 <Icon as={FolderPlusIcon} className="text-secondary-foreground size-5" />
-                <Text className="text-secondary-foreground text-sm font-medium">New Folder</Text>
+                <Text className="text-secondary-foreground text-sm font-medium">
+                  {t('bucket.newFolder')}
+                </Text>
               </Pressable>
             </>
           )}
@@ -975,20 +990,19 @@ export default function ObjectBrowserScreen() {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Files</AlertDialogTitle>
+            <AlertDialogTitle>{t('bucket.deleteFiles')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete{' '}
-              {objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder).length} file
-              {objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder).length > 1 ? 's' : ''}?
-              This action cannot be undone.
+              {t('bucket.deleteFilesDesc', {
+                count: objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder).length,
+              })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>
-              <Text>Cancel</Text>
+              <Text>{t('cancel')}</Text>
             </AlertDialogCancel>
             <AlertDialogAction variant="destructive" onPress={confirmDelete}>
-              <Text>Delete</Text>
+              <Text>{t('delete')}</Text>
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1002,14 +1016,14 @@ export default function ObjectBrowserScreen() {
         }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Download Complete</AlertDialogTitle>
+            <AlertDialogTitle>{t('bucket.downloadComplete')}</AlertDialogTitle>
             <AlertDialogDescription>
-              {downloadCompleteDialog?.name} saved successfully.
+              {t('bucket.downloadCompleteDesc', { name: downloadCompleteDialog?.name ?? '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>
-              <Text>OK</Text>
+              <Text>{t('ok')}</Text>
             </AlertDialogCancel>
             <AlertDialogAction
               onPress={() => {
@@ -1018,7 +1032,7 @@ export default function ObjectBrowserScreen() {
                 }
                 setDownloadCompleteDialog(null);
               }}>
-              <Text className="text-primary-foreground">Share</Text>
+              <Text className="text-primary-foreground">{t('bucket.share')}</Text>
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1028,14 +1042,14 @@ export default function ObjectBrowserScreen() {
       <Dialog open={showCreateFolderDialog} onOpenChange={setShowCreateFolderDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Create Folder</DialogTitle>
-            <DialogDescription>Enter a name for the new folder.</DialogDescription>
+            <DialogTitle>{t('bucket.createFolder')}</DialogTitle>
+            <DialogDescription>{t('bucket.createFolderDesc')}</DialogDescription>
           </DialogHeader>
           <View className="gap-4">
             <View className="gap-2">
-              <Label>Folder Name</Label>
+              <Label>{t('bucket.folderName')}</Label>
               <Input
-                placeholder="new-folder"
+                placeholder={t('bucket.folderPlaceholder')}
                 value={newFolderName}
                 onChangeText={(text) => {
                   setNewFolderName(text);
@@ -1053,7 +1067,7 @@ export default function ObjectBrowserScreen() {
           </View>
           <DialogFooter>
             <Button variant="outline" onPress={() => setShowCreateFolderDialog(false)}>
-              <Text>Cancel</Text>
+              <Text>{t('cancel')}</Text>
             </Button>
             <Button
               onPress={handleCreateFolder}
@@ -1061,7 +1075,7 @@ export default function ObjectBrowserScreen() {
               {isCreatingFolder ? (
                 <ActivityIndicator size="small" color="white" />
               ) : (
-                <Text className="text-primary-foreground">Create</Text>
+                <Text className="text-primary-foreground">{t('create')}</Text>
               )}
             </Button>
           </DialogFooter>
@@ -1072,9 +1086,9 @@ export default function ObjectBrowserScreen() {
       <AlertDialog open={showDeleteFolderDialog} onOpenChange={setShowDeleteFolderDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Folder</AlertDialogTitle>
+            <AlertDialogTitle>{t('bucket.deleteFolder')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Delete "{deleteFolderTarget?.name}" and all contents? This cannot be undone.
+              {t('bucket.deleteFolderDesc', { name: deleteFolderTarget?.name ?? '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1083,13 +1097,13 @@ export default function ObjectBrowserScreen() {
                 setShowDeleteFolderDialog(false);
                 setDeleteFolderTarget(null);
               }}>
-              <Text>Cancel</Text>
+              <Text>{t('cancel')}</Text>
             </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onPress={confirmDeleteFolder}
               disabled={isDeletingFolder}>
-              <Text>{isDeletingFolder ? 'Deleting...' : 'Delete'}</Text>
+              <Text>{isDeletingFolder ? t('buckets.deleting') : t('delete')}</Text>
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

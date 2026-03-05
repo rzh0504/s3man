@@ -56,6 +56,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import { useT } from '@/lib/i18n';
 
 interface ProviderSection {
   connection: S3Connection;
@@ -98,6 +99,7 @@ function ProviderSectionCard({
 }) {
   const conn = section.connection;
   const providerInfo = getProvider(conn.config.provider);
+  const t = useT();
 
   const chevronStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: withTiming(collapsed ? '0deg' : '90deg', { duration: 300 }) }],
@@ -121,7 +123,9 @@ function ProviderSectionCard({
         </View>
         <Badge variant="secondary">
           <Text className="text-xs">
-            {section.buckets.length} bucket{section.buckets.length !== 1 ? 's' : ''}
+            {section.buckets.length === 1
+              ? t('buckets.bucketCount', { count: 1 })
+              : t('buckets.bucketCountPlural', { count: section.buckets.length })}
           </Text>
         </Badge>
         <Pressable
@@ -138,7 +142,7 @@ function ProviderSectionCard({
           <Separator />
           {section.buckets.length === 0 ? (
             <View className="items-center py-6">
-              <Text className="text-muted-foreground text-sm">No buckets</Text>
+              <Text className="text-muted-foreground text-sm">{t('buckets.noBuckets')}</Text>
             </View>
           ) : (
             section.buckets.map((bucket) => (
@@ -161,6 +165,7 @@ function ProviderSectionCard({
 export default function BucketIndexScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const t = useT();
   const connections = useConnectionStore((s) => s.connections);
   const isInitializing = useConnectionStore((s) => s.isInitializing);
   const { buckets, isLoading, hasCachedData, setBucketsForConnection, setLoading } =
@@ -372,10 +377,7 @@ export default function BucketIndexScreen() {
       setBucketsForConnection(deleteBucketTarget.connectionId, result);
       setDeleteBucketTarget(null);
     } catch (error: any) {
-      Alert.alert(
-        'Delete Failed',
-        error.message || 'Failed to delete bucket. Make sure the bucket is empty.'
-      );
+      Alert.alert(t('buckets.deleteFailed'), error.message || t('buckets.deleteFailedDesc'));
       setIsDeletingBucket(false);
     } finally {
       setIsDeletingBucket(false);
@@ -389,7 +391,7 @@ export default function BucketIndexScreen() {
       <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
           <Icon as={DatabaseIcon} className="text-foreground size-6" />
-          <Text className="text-foreground text-xl font-bold">Buckets</Text>
+          <Text className="text-foreground text-xl font-bold">{t('buckets.title')}</Text>
         </View>
         <Separator />
         <BucketListSkeleton />
@@ -401,13 +403,13 @@ export default function BucketIndexScreen() {
       <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
           <Icon as={DatabaseIcon} className="text-foreground size-6" />
-          <Text className="text-foreground text-xl font-bold">Buckets</Text>
+          <Text className="text-foreground text-xl font-bold">{t('buckets.title')}</Text>
         </View>
         <Separator />
         <EmptyState
           icon={WifiOffIcon}
-          title="No Connections"
-          description="Go to Config tab to add an S3 storage provider."
+          title={t('buckets.noConnections')}
+          description={t('buckets.noConnectionsDesc')}
         />
       </View>
     );
@@ -421,7 +423,7 @@ export default function BucketIndexScreen() {
       <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
           <Icon as={DatabaseIcon} className="text-foreground size-6" />
-          <Text className="text-foreground text-xl font-bold">Buckets</Text>
+          <Text className="text-foreground text-xl font-bold">{t('buckets.title')}</Text>
         </View>
         <Separator />
         <BucketListSkeleton />
@@ -434,13 +436,13 @@ export default function BucketIndexScreen() {
       <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
           <Icon as={DatabaseIcon} className="text-foreground size-6" />
-          <Text className="text-foreground text-xl font-bold">Buckets</Text>
+          <Text className="text-foreground text-xl font-bold">{t('buckets.title')}</Text>
         </View>
         <Separator />
         <EmptyState
           icon={WifiOffIcon}
-          title="Not Connected"
-          description="All connections are offline. Go to Config tab to reconnect."
+          title={t('buckets.notConnected')}
+          description={t('buckets.notConnectedDesc')}
         />
       </View>
     );
@@ -455,7 +457,7 @@ export default function BucketIndexScreen() {
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center gap-2.5">
             <Icon as={DatabaseIcon} className="text-foreground size-6" />
-            <Text className="text-foreground text-xl font-bold">Buckets</Text>
+            <Text className="text-foreground text-xl font-bold">{t('buckets.title')}</Text>
           </View>
           <Pressable onPress={loadAllBuckets} className="active:bg-accent rounded-md p-2">
             <Icon as={RefreshCwIcon} className="text-muted-foreground size-4" />
@@ -499,8 +501,8 @@ export default function BucketIndexScreen() {
           ) : filteredSections.length === 0 ? (
             <EmptyState
               icon={FolderIcon}
-              title="No Buckets"
-              description="Create a new bucket to get started."
+              title={t('buckets.noBucketsTitle')}
+              description={t('buckets.noBucketsDesc')}
             />
           ) : (
             filteredSections.map((section) => (
@@ -522,14 +524,14 @@ export default function BucketIndexScreen() {
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Create New Bucket</DialogTitle>
-            <DialogDescription>Enter a unique name for your new S3 bucket.</DialogDescription>
+            <DialogTitle>{t('buckets.createTitle')}</DialogTitle>
+            <DialogDescription>{t('buckets.createDesc')}</DialogDescription>
           </DialogHeader>
           <View className="gap-4">
             <View className="gap-2">
-              <Label>Bucket Name</Label>
+              <Label>{t('buckets.bucketName')}</Label>
               <Input
-                placeholder="my-new-bucket"
+                placeholder={t('buckets.bucketPlaceholder')}
                 value={newBucketName}
                 onChangeText={(text) => {
                   setNewBucketName(text);
@@ -547,13 +549,13 @@ export default function BucketIndexScreen() {
           </View>
           <DialogFooter>
             <Button variant="outline" onPress={() => setShowCreateDialog(false)}>
-              <Text>Cancel</Text>
+              <Text>{t('cancel')}</Text>
             </Button>
             <Button onPress={handleCreateBucket} disabled={isCreating || !newBucketName.trim()}>
               {isCreating ? (
                 <ActivityIndicator size="small" color="white" />
               ) : (
-                <Text className="text-primary-foreground">Create</Text>
+                <Text className="text-primary-foreground">{t('create')}</Text>
               )}
             </Button>
           </DialogFooter>
@@ -571,10 +573,9 @@ export default function BucketIndexScreen() {
         }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Bucket</AlertDialogTitle>
+            <AlertDialogTitle>{t('buckets.deleteTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Delete "{deleteBucketTarget?.name}"? The bucket must be empty. This action cannot be
-              undone.
+              {t('buckets.deleteDesc', { name: deleteBucketTarget?.name ?? '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -583,13 +584,13 @@ export default function BucketIndexScreen() {
                 setDeleteBucketTarget(null);
                 setIsDeletingBucket(false);
               }}>
-              <Text>Cancel</Text>
+              <Text>{t('cancel')}</Text>
             </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onPress={confirmDeleteBucket}
               disabled={isDeletingBucket}>
-              <Text>{isDeletingBucket ? 'Deleting...' : 'Delete'}</Text>
+              <Text>{isDeletingBucket ? t('buckets.deleting') : t('delete')}</Text>
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
