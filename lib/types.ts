@@ -16,6 +16,8 @@ export interface S3Config {
   proxyUrl?: string;
   /** Bearer token for authenticating with the Worker proxy */
   proxyToken?: string;
+  /** Short alias for clean share URLs, e.g. "b2", "r2". Registered in Worker KV. */
+  proxyAlias?: string;
 }
 
 // 连接状态

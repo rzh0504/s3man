@@ -388,6 +388,11 @@ export default function ConnectionsScreen() {
       endpointUrl: formConfig.endpointUrl.trim(),
       proxyUrl: formConfig.proxyUrl?.trim() || undefined,
       proxyToken: formConfig.proxyToken?.trim() || undefined,
+      proxyAlias:
+        formConfig.proxyAlias
+          ?.trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9-]/g, '') || undefined,
     };
 
     // Include visible buckets selection if user has discovered buckets
@@ -806,7 +811,7 @@ export default function ConnectionsScreen() {
 
           {/* Proxy Token (shown when proxy URL is set) */}
           {!!formConfig.proxyUrl && (
-            <View className="mb-6 gap-2">
+            <View className="mb-4 gap-2">
               <Label>Proxy Token</Label>
               <Input
                 placeholder="Bearer token for proxy auth"
@@ -816,6 +821,25 @@ export default function ConnectionsScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
+            </View>
+          )}
+
+          {/* Proxy Alias (shown when proxy URL is set) */}
+          {!!formConfig.proxyUrl && (
+            <View className="mb-6 gap-2">
+              <Label>
+                Proxy Alias <Text className="text-muted-foreground text-xs">(optional)</Text>
+              </Label>
+              <Input
+                placeholder="b2"
+                value={formConfig.proxyAlias ?? ''}
+                onChangeText={(text) => setFormConfig((p) => ({ ...p, proxyAlias: text }))}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Text className="text-muted-foreground text-xs">
+                Short name for clean share URLs. e.g. "b2" → proxy.com/b2/bucket/file.png
+              </Text>
             </View>
           )}
 

@@ -144,6 +144,9 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     } finally {
       await _persist(get().connections);
     }
+
+    // Register proxy alias in Worker KV (best-effort, non-blocking)
+    S3Service.registerProxyAlias(id).catch(() => {});
   },
 
   updateConnection: async (id, displayName, config) => {
@@ -166,9 +169,16 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     } finally {
       await _persist(get().connections);
     }
+
+    // Re-register proxy alias in Worker KV (best-effort, non-blocking)
+    S3Service.registerProxyAlias(id).catch(() => {});
   },
 
   removeConnection: async (id) => {
+    // Unregister proxy alias from Worker KV (best-effort)
+    const conn = get().connections.find((c) => c.id === id);
+    if (conn) S3Service.unregisterProxyAlias(conn.config).catch(() => {});
+
     S3Service.destroyClientForConnection(id);
     set((state) => ({
       connections: state.connections.filter((c) => c.id !== id),

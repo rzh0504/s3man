@@ -503,14 +503,14 @@ export default function ObjectBrowserScreen() {
   const handlePreviewCopyLink = React.useCallback(async () => {
     if (!previewObject || !bucketName || !connectionId) return;
     try {
-      const url = await S3Service.getFileUrl(connectionId, bucketName, previewObject.key);
+      const url = await S3Service.getShareUrl(connectionId, bucketName, previewObject.key);
       await Share.share({ message: url });
     } catch (error: any) {
       console.error('Copy link error:', error);
     }
   }, [previewObject, bucketName, connectionId]);
 
-  // ── View / share presigned URL ───────────────────────────────────────────
+  // ── View / share URL ─────────────────────────────────────────────────────
   const handleShareUrls = React.useCallback(async () => {
     if (!bucketName || !connectionId) return;
     const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
@@ -519,7 +519,7 @@ export default function ObjectBrowserScreen() {
     try {
       const urls: string[] = [];
       for (const obj of selected) {
-        const url = await S3Service.getFileUrl(connectionId, bucketName, obj.key);
+        const url = await S3Service.getShareUrl(connectionId, bucketName, obj.key);
         urls.push(selected.length > 1 ? `${obj.name}\n${url}` : url);
       }
       await Share.share({ message: urls.join('\n\n') });

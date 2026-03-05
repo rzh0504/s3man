@@ -2,10 +2,16 @@ name = "s3man-proxy"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
+# KV namespace for stored S3 configs (clean share URLs)
+# Create with: wrangler kv namespace create S3_CONFIGS
+# Then paste the id below:
+[[kv_namespaces]]
+binding = "S3_CONFIGS"
+id = "2044dc5031904267bd558b7c64dad819"
+
 # Custom domain (uncomment and set your domain):
 # routes = [
 #   { pattern = "files.yourdomain.com", custom_domain = true }
 # ]
 
-# Only one secret needed: wrangler secret put AUTH_TOKEN
-# S3 credentials are passed per-request from the app (no provider env vars needed)
+# Secrets: wrangler secret put AUTH_TOKEN

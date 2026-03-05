@@ -405,6 +405,7 @@ function buildProxyS3CfgParam(config: S3Config): string {
 
 /**
  * Build a proxy URL for a given bucket + key.
+ * Used for app-internal requests (Image/Video components, fetch).
  */
 function buildProxyUrl(config: S3Config, bucket: string, key: string): string {
   const base = config.proxyUrl!.replace(/\/+$/, '');
@@ -416,8 +417,17 @@ function buildProxyUrl(config: S3Config, bucket: string, key: string): string {
 }
 
 /**
+ * Build a clean share URL: /{alias}/{bucket}/{key} — no credentials, no token.
+ */
+function buildCleanShareUrl(config: S3Config, bucket: string, key: string): string {
+  const base = config.proxyUrl!.replace(/\/+$/, '');
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/');
+  return `${base}/${encodeURIComponent(config.proxyAlias!)}/${encodeURIComponent(bucket)}/${encodedKey}`;
+}
+
+/**
  * Get a file URL — uses proxy if configured, otherwise falls back to presigned URL.
- * For read-only access (preview, download, share).
+ * For app-internal read-only access (preview, download).
  */
 export async function getFileUrl(
   connectionId: string,
@@ -469,6 +479,70 @@ export async function batchGetFileUrls(
     return result;
   }
   return batchGetPresignedUrls(connectionId, bucket, keys, expiresIn);
+}
+
+/**
+ * Get a shareable URL — clean proxy URL (no credentials) if alias is configured,
+ * otherwise falls back to presigned URL.
+ */
+export async function getShareUrl(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  expiresIn = 3600
+): Promise<string> {
+  const { config } = getClientEntry(connectionId);
+  if (config.proxyUrl && config.proxyAlias) {
+    return buildCleanShareUrl(config, bucket, key);
+  }
+  return getPresignedUrl(connectionId, bucket, key, expiresIn);
+}
+
+/**
+ * Register this connection's S3 config in the Worker KV for clean share URLs.
+ * Call after saving/updating a connection that has proxyUrl + proxyAlias.
+ */
+export async function registerProxyAlias(connectionId: string): Promise<void> {
+  const { config } = getClientEntry(connectionId);
+  if (!config.proxyUrl || !config.proxyAlias || !config.proxyToken) return;
+  const base = config.proxyUrl.replace(/\/+$/, '');
+  const body = {
+    endpoint: resolveEndpoint(config),
+    region: config.region,
+    accessKey: config.accessKeyId,
+    secretKey: config.secretAccessKey,
+  };
+  const resp = await fetch(
+    `${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${config.proxyToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }
+  );
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Failed to register proxy alias: ${err}`);
+  }
+}
+
+/**
+ * Remove a proxy alias from Worker KV.
+ * Call before deleting a connection that has proxyUrl + proxyAlias.
+ */
+export async function unregisterProxyAlias(config: S3Config): Promise<void> {
+  if (!config.proxyUrl || !config.proxyAlias || !config.proxyToken) return;
+  const base = config.proxyUrl.replace(/\/+$/, '');
+  await fetch(
+    `${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${config.proxyToken}` },
+    }
+  ).catch(() => {}); // best-effort
 }
 
 /** Guess MIME type from file extension */

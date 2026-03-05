@@ -1,31 +1,37 @@
 /**
  * s3man – Cloudflare Worker Proxy for S3-compatible storage
  *
- * A generic S3 reverse proxy — S3 credentials are passed per-request
- * from the app, so one Worker serves all providers with no env-var setup.
+ * Two access modes:
+ *
+ * 1. **Inline config** (app-internal: Image/Video/fetch)
+ *    AUTH_TOKEN required. S3 config via X-S3-* headers or ?s3cfg= param.
+ *    URL: /{bucket}/{key}
+ *
+ * 2. **KV alias** (clean share URLs, no auth needed)
+ *    S3 config stored in KV by alias. Registered via management API.
+ *    URL: /{alias}/{bucket}/{key}
+ *
+ * Management API (requires AUTH_TOKEN):
+ *   PUT    /api/configs/{alias}  — register S3 config
+ *   DELETE /api/configs/{alias}  — remove S3 config
  *
  * Deploy: wrangler deploy
- *
- * Environment variables (set via wrangler secret):
- *   AUTH_TOKEN — Bearer token required for all requests
- *
- * S3 config is passed via request headers:
- *   X-S3-Endpoint   — e.g. https://s3.us-west-004.backblazeb2.com
- *   X-S3-Region     — e.g. us-west-004
- *   X-S3-Access-Key — S3 access key ID
- *   X-S3-Secret-Key — S3 secret access key
- *
- * Or via a single query param for Image/Video component compatibility:
- *   ?s3cfg=<base64url-encoded JSON of {e,r,a,s}>
- *
- * URL pattern: https://your-worker.domain/{bucket}/{key}
- *
- * Optional query params:
- *   ?download=1  — Force Content-Disposition: attachment
+ * Secrets: wrangler secret put AUTH_TOKEN
+ * KV: wrangler kv namespace create S3_CONFIGS  (bind id in wrangler.toml)
  */
 
 export interface Env {
   AUTH_TOKEN: string;
+  S3_CONFIGS: KVNamespace;
+}
+
+// KVNamespace is provided by Cloudflare Workers runtime
+declare global {
+  interface KVNamespace {
+    get(key: string): Promise<string | null>;
+    put(key: string, value: string): Promise<void>;
+    delete(key: string): Promise<void>;
+  }
 }
 
 interface S3Cfg {
@@ -48,32 +54,17 @@ export default {
       });
     }
 
-    // ── Auth ────────────────────────────────────────────────────
     const url = new URL(request.url);
-    const authHeader = request.headers.get('Authorization');
-    const tokenParam = url.searchParams.get('token');
-    const token = authHeader?.replace('Bearer ', '') || tokenParam;
-    if (!token || token !== env.AUTH_TOKEN) {
-      return json({ error: 'Unauthorized' }, 401);
+
+    // ── Management API: /api/configs/{alias} ────────────────────
+    if (url.pathname.startsWith('/api/')) {
+      return handleManagementApi(request, url, env);
     }
 
-    // ── Parse path: /{bucket}/{...key} ──────────────────────────
-    const parts = url.pathname.slice(1).split('/');
-    if (parts.length < 2 || !parts[0]) {
-      return json({ error: 'URL must be /{bucket}/{key}' }, 400);
-    }
-
-    const bucket = decodeURIComponent(parts[0]);
-    const key = parts.slice(1).map(decodeURIComponent).join('/');
-    if (!key) {
-      return json({ error: 'Object key is required' }, 400);
-    }
-
-    // ── Resolve S3 config (headers or ?s3cfg query param) ───────
-    const s3Cfg = resolveS3Config(request, url);
-    if (!s3Cfg) {
-      return json({ error: 'Missing S3 config. Provide X-S3-* headers or ?s3cfg= param' }, 400);
-    }
+    // ── Resolve S3 config and path ──────────────────────────────
+    const resolved = await resolveRequest(request, url, env);
+    if (resolved instanceof Response) return resolved;
+    const { s3Cfg, bucket, key } = resolved;
 
     // ── Build S3 request ────────────────────────────────────────
     const s3Url = `${s3Cfg.e}/${bucket}/${key}`;
@@ -146,11 +137,118 @@ export default {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
+/** KV key prefix for stored configs */
+const KV_PREFIX = 'cfg:';
+
 /**
- * Resolve S3 config from request headers or ?s3cfg query param.
- * Headers take priority.
+ * Management API: register / remove S3 configs stored in KV.
+ * Always requires AUTH_TOKEN.
  */
-function resolveS3Config(request: Request, url: URL): S3Cfg | null {
+async function handleManagementApi(request: Request, url: URL, env: Env): Promise<Response> {
+  // Auth check
+  const token =
+    request.headers.get('Authorization')?.replace('Bearer ', '') ||
+    url.searchParams.get('token');
+  if (!token || token !== env.AUTH_TOKEN) {
+    return json({ error: 'Unauthorized' }, 401);
+  }
+
+  // Route: /api/configs/{alias}
+  const match = url.pathname.match(/^\/api\/configs\/([^/]+)$/);
+  if (!match) return json({ error: 'Not found' }, 404);
+
+  const alias = decodeURIComponent(match[1]);
+
+  if (request.method === 'PUT') {
+    const body = (await request.json()) as Record<string, string>;
+    if (!body.endpoint || !body.region || !body.accessKey || !body.secretKey) {
+      return json({ error: 'Missing fields: endpoint, region, accessKey, secretKey' }, 400);
+    }
+    const cfg: S3Cfg = {
+      e: body.endpoint,
+      r: body.region,
+      a: body.accessKey,
+      s: body.secretKey,
+    };
+    await env.S3_CONFIGS.put(KV_PREFIX + alias, JSON.stringify(cfg));
+    return json({ ok: true, alias });
+  }
+
+  if (request.method === 'DELETE') {
+    await env.S3_CONFIGS.delete(KV_PREFIX + alias);
+    return json({ ok: true, alias });
+  }
+
+  return json({ error: 'Method not allowed' }, 405);
+}
+
+/**
+ * Resolve S3 config and path from the request.
+ *
+ * 1. If inline config is present (X-S3-* headers or ?s3cfg=):
+ *    → AUTH_TOKEN required, path = /{bucket}/{key}
+ *
+ * 2. Otherwise try first path segment as KV alias:
+ *    → No auth required, path = /{alias}/{bucket}/{key}
+ */
+async function resolveRequest(
+  request: Request,
+  url: URL,
+  env: Env
+): Promise<{ s3Cfg: S3Cfg; bucket: string; key: string } | Response> {
+  const inlineCfg = resolveInlineS3Config(request, url);
+
+  if (inlineCfg) {
+    // Inline mode: requires AUTH_TOKEN
+    const token =
+      request.headers.get('Authorization')?.replace('Bearer ', '') ||
+      url.searchParams.get('token');
+    if (!token || token !== env.AUTH_TOKEN) {
+      return json({ error: 'Unauthorized' }, 401);
+    }
+
+    const parts = url.pathname.slice(1).split('/');
+    if (parts.length < 2 || !parts[0]) {
+      return json({ error: 'URL must be /{bucket}/{key}' }, 400);
+    }
+    const bucket = decodeURIComponent(parts[0]);
+    const key = parts.slice(1).map(decodeURIComponent).join('/');
+    if (!key) return json({ error: 'Object key is required' }, 400);
+
+    return { s3Cfg: inlineCfg, bucket, key };
+  }
+
+  // KV alias mode: /{alias}/{bucket}/{key} — no auth needed
+  const parts = url.pathname.slice(1).split('/');
+  if (parts.length < 3 || !parts[0]) {
+    return json({ error: 'URL must be /{alias}/{bucket}/{key}' }, 400);
+  }
+
+  const alias = decodeURIComponent(parts[0]);
+  const stored = await env.S3_CONFIGS.get(KV_PREFIX + alias);
+  if (!stored) {
+    return json({ error: `Unknown alias: ${alias}` }, 404);
+  }
+
+  let s3Cfg: S3Cfg;
+  try {
+    s3Cfg = JSON.parse(stored);
+  } catch {
+    return json({ error: 'Corrupted config in KV' }, 500);
+  }
+
+  const bucket = decodeURIComponent(parts[1]);
+  const key = parts.slice(2).map(decodeURIComponent).join('/');
+  if (!key) return json({ error: 'Object key is required' }, 400);
+
+  return { s3Cfg, bucket, key };
+}
+
+/**
+ * Try to get S3 config from request headers or ?s3cfg query param.
+ * Returns null if not present.
+ */
+function resolveInlineS3Config(request: Request, url: URL): S3Cfg | null {
   // Try headers first
   const endpoint = request.headers.get('X-S3-Endpoint');
   const region = request.headers.get('X-S3-Region');
