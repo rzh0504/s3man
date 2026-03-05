@@ -1,19 +1,22 @@
 /**
  * s3man – Cloudflare Worker Proxy for S3-compatible storage
  *
- * Provides clean URLs for file access without exposing S3 credentials.
- * Supports GET (download/preview), PUT (upload), and HEAD requests.
+ * A generic S3 reverse proxy — S3 credentials are passed per-request
+ * from the app, so one Worker serves all providers with no env-var setup.
  *
  * Deploy: wrangler deploy
  *
  * Environment variables (set via wrangler secret):
- *   AUTH_TOKEN    — Bearer token required for all requests
+ *   AUTH_TOKEN — Bearer token required for all requests
  *
- * For each S3 backend, add secrets:
- *   S3_ENDPOINT   — e.g. https://s3.us-west-004.backblazeb2.com
- *   S3_REGION     — e.g. us-west-004
- *   S3_ACCESS_KEY — S3 access key ID
- *   S3_SECRET_KEY — S3 secret access key
+ * S3 config is passed via request headers:
+ *   X-S3-Endpoint   — e.g. https://s3.us-west-004.backblazeb2.com
+ *   X-S3-Region     — e.g. us-west-004
+ *   X-S3-Access-Key — S3 access key ID
+ *   X-S3-Secret-Key — S3 secret access key
+ *
+ * Or via a single query param for Image/Video component compatibility:
+ *   ?s3cfg=<base64url-encoded JSON of {e,r,a,s}>
  *
  * URL pattern: https://your-worker.domain/{bucket}/{key}
  *
@@ -23,10 +26,17 @@
 
 export interface Env {
   AUTH_TOKEN: string;
-  S3_ENDPOINT: string;
-  S3_REGION: string;
-  S3_ACCESS_KEY: string;
-  S3_SECRET_KEY: string;
+}
+
+interface S3Cfg {
+  /** endpoint */
+  e: string;
+  /** region */
+  r: string;
+  /** accessKey */
+  a: string;
+  /** secretKey */
+  s: string;
 }
 
 export default {
@@ -48,20 +58,25 @@ export default {
     }
 
     // ── Parse path: /{bucket}/{...key} ──────────────────────────
-
     const parts = url.pathname.slice(1).split('/');
     if (parts.length < 2 || !parts[0]) {
       return json({ error: 'URL must be /{bucket}/{key}' }, 400);
     }
 
-    const bucket = parts[0];
-    const key = parts.slice(1).join('/');
+    const bucket = decodeURIComponent(parts[0]);
+    const key = parts.slice(1).map(decodeURIComponent).join('/');
     if (!key) {
       return json({ error: 'Object key is required' }, 400);
     }
 
+    // ── Resolve S3 config (headers or ?s3cfg query param) ───────
+    const s3Cfg = resolveS3Config(request, url);
+    if (!s3Cfg) {
+      return json({ error: 'Missing S3 config. Provide X-S3-* headers or ?s3cfg= param' }, 400);
+    }
+
     // ── Build S3 request ────────────────────────────────────────
-    const s3Url = `${env.S3_ENDPOINT}/${bucket}/${key}`;
+    const s3Url = `${s3Cfg.e}/${bucket}/${key}`;
 
     const method = request.method;
     if (!['GET', 'HEAD', 'PUT'].includes(method)) {
@@ -72,9 +87,9 @@ export default {
     const s3Headers = await signRequest({
       method,
       url: s3Url,
-      region: env.S3_REGION,
-      accessKey: env.S3_ACCESS_KEY,
-      secretKey: env.S3_SECRET_KEY,
+      region: s3Cfg.r,
+      accessKey: s3Cfg.a,
+      secretKey: s3Cfg.s,
       body: method === 'PUT' ? request.body : null,
       contentType: request.headers.get('Content-Type') || undefined,
     });
@@ -131,6 +146,35 @@ export default {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
+/**
+ * Resolve S3 config from request headers or ?s3cfg query param.
+ * Headers take priority.
+ */
+function resolveS3Config(request: Request, url: URL): S3Cfg | null {
+  // Try headers first
+  const endpoint = request.headers.get('X-S3-Endpoint');
+  const region = request.headers.get('X-S3-Region');
+  const accessKey = request.headers.get('X-S3-Access-Key');
+  const secretKey = request.headers.get('X-S3-Secret-Key');
+  if (endpoint && region && accessKey && secretKey) {
+    return { e: endpoint, r: region, a: accessKey, s: secretKey };
+  }
+
+  // Fallback: ?s3cfg=<base64url JSON>
+  const cfgParam = url.searchParams.get('s3cfg');
+  if (cfgParam) {
+    try {
+      const decoded = atob(cfgParam.replace(/-/g, '+').replace(/_/g, '/'));
+      const cfg = JSON.parse(decoded) as S3Cfg;
+      if (cfg.e && cfg.r && cfg.a && cfg.s) return cfg;
+    } catch {
+      // invalid base64/json
+    }
+  }
+
+  return null;
+}
+
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -145,7 +189,7 @@ function corsHeaders(): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, PUT, HEAD, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-S3-Endpoint, X-S3-Region, X-S3-Access-Key, X-S3-Secret-Key',
     'Access-Control-Max-Age': '86400',
   };
 }

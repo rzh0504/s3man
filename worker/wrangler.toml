@@ -7,8 +7,5 @@ compatibility_date = "2024-12-01"
 #   { pattern = "files.yourdomain.com", custom_domain = true }
 # ]
 
-# Set secrets via: wrangler secret put AUTH_TOKEN
-# wrangler secret put S3_ENDPOINT
-# wrangler secret put S3_REGION
-# wrangler secret put S3_ACCESS_KEY
-# wrangler secret put S3_SECRET_KEY
+# Only one secret needed: wrangler secret put AUTH_TOKEN
+# S3 credentials are passed per-request from the app (no provider env vars needed)

@@ -385,6 +385,37 @@ export async function getPresignedUploadUrl(
 }
 
 /**
+ * Build the base64url-encoded S3 config query param for the proxy.
+ * This embeds S3 credentials in the URL so Image/Video components can use it directly.
+ */
+function buildProxyS3CfgParam(config: S3Config): string {
+  const cfg = {
+    e: resolveEndpoint(config),
+    r: config.region,
+    a: config.accessKeyId,
+    s: config.secretAccessKey,
+  };
+  // Base64url encode (no padding, URL-safe chars)
+  const b64 = btoa(JSON.stringify(cfg))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return b64;
+}
+
+/**
+ * Build a proxy URL for a given bucket + key.
+ */
+function buildProxyUrl(config: S3Config, bucket: string, key: string): string {
+  const base = config.proxyUrl!.replace(/\/+$/, '');
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/');
+  const params = new URLSearchParams();
+  if (config.proxyToken) params.set('token', config.proxyToken);
+  params.set('s3cfg', buildProxyS3CfgParam(config));
+  return `${base}/${encodeURIComponent(bucket)}/${encodedKey}?${params.toString()}`;
+}
+
+/**
  * Get a file URL — uses proxy if configured, otherwise falls back to presigned URL.
  * For read-only access (preview, download, share).
  */
@@ -396,22 +427,28 @@ export async function getFileUrl(
 ): Promise<string> {
   const { config } = getClientEntry(connectionId);
   if (config.proxyUrl) {
-    const base = config.proxyUrl.replace(/\/+$/, '');
-    const encodedKey = key.split('/').map(encodeURIComponent).join('/');
-    const tokenQuery = config.proxyToken ? `?token=${encodeURIComponent(config.proxyToken)}` : '';
-    return `${base}/${encodeURIComponent(bucket)}/${encodedKey}${tokenQuery}`;
+    return buildProxyUrl(config, bucket, key);
   }
   return getPresignedUrl(connectionId, bucket, key, expiresIn);
 }
 
 /**
- * Get the Authorization header for proxy requests.
+ * Get headers for proxy requests (fetch/download that support custom headers).
  * Returns null if the connection doesn't use a proxy.
  */
-export function getProxyAuthHeader(connectionId: string): Record<string, string> | null {
+export function getProxyHeaders(connectionId: string): Record<string, string> | null {
   const { config } = getClientEntry(connectionId);
-  if (!config.proxyUrl || !config.proxyToken) return null;
-  return { Authorization: `Bearer ${config.proxyToken}` };
+  if (!config.proxyUrl) return null;
+  const headers: Record<string, string> = {
+    'X-S3-Endpoint': resolveEndpoint(config),
+    'X-S3-Region': config.region,
+    'X-S3-Access-Key': config.accessKeyId,
+    'X-S3-Secret-Key': config.secretAccessKey,
+  };
+  if (config.proxyToken) {
+    headers['Authorization'] = `Bearer ${config.proxyToken}`;
+  }
+  return headers;
 }
 
 /**
@@ -425,12 +462,9 @@ export async function batchGetFileUrls(
 ): Promise<Record<string, string>> {
   const { config } = getClientEntry(connectionId);
   if (config.proxyUrl) {
-    const base = config.proxyUrl.replace(/\/+$/, '');
-    const tokenQuery = config.proxyToken ? `?token=${encodeURIComponent(config.proxyToken)}` : '';
     const result: Record<string, string> = {};
     for (const key of keys) {
-      const encodedKey = key.split('/').map(encodeURIComponent).join('/');
-      result[key] = `${base}/${encodeURIComponent(bucket)}/${encodedKey}${tokenQuery}`;
+      result[key] = buildProxyUrl(config, bucket, key);
     }
     return result;
   }

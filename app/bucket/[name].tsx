@@ -383,7 +383,7 @@ export default function ObjectBrowserScreen() {
           setPreviewUrl(url);
         } else if (S3Service.isCodeFile(obj.name)) {
           // Fetch text content for code/text files
-          const headers = S3Service.getProxyAuthHeader(connectionId) || {};
+          const headers = S3Service.getProxyHeaders(connectionId) || {};
           const response = await fetch(url, { headers });
           const text = await response.text();
           // Limit to 100KB for display
@@ -437,7 +437,7 @@ export default function ObjectBrowserScreen() {
         updateTask(taskId, { progress: 10 });
 
         const downloadResult = await FileSystem.downloadAsync(url, destUri, {
-          headers: S3Service.getProxyAuthHeader(connectionId) || undefined,
+          headers: S3Service.getProxyHeaders(connectionId) || undefined,
         });
 
         updateTask(taskId, {
