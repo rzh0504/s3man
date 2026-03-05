@@ -35,9 +35,6 @@ import {
   SearchIcon,
   FolderIcon,
   DownloadIcon,
-  CopyIcon,
-  ClipboardPasteIcon,
-  CheckIcon,
   ShareIcon,
   ChevronLeftIcon,
 } from 'lucide-react-native';
@@ -56,8 +53,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
-import * as Clipboard from 'expo-clipboard';
+
 import { useRouter } from 'expo-router';
+import { useT } from '@/lib/i18n';
 
 const DEFAULT_CONFIG: S3Config = {
   provider: 'cloudflare-r2',
@@ -82,6 +80,7 @@ function ConnectionCard({
   onReconnect: () => void;
 }) {
   const providerInfo = getProvider(conn.config.provider);
+  const t = useT();
 
   const statusColor =
     conn.status === 'connected'
@@ -94,12 +93,12 @@ function ConnectionCard({
 
   const statusLabel =
     conn.status === 'connected'
-      ? 'ONLINE'
+      ? t('conn.connected')
       : conn.status === 'connecting'
-        ? 'LINKING...'
+        ? t('conn.connecting')
         : conn.status === 'error'
-          ? 'ERROR'
-          : 'OFFLINE';
+          ? t('conn.statusError')
+          : t('conn.statusOffline');
 
   return (
     <View className="border-border bg-card rounded-xl border p-4">
@@ -142,26 +141,26 @@ function ConnectionCard({
             onPress={onReconnect}
             className="bg-primary flex-1 flex-row items-center justify-center gap-1.5 rounded-md py-2">
             <Icon as={RefreshCwIcon} className="text-primary-foreground size-3.5" />
-            <Text className="text-primary-foreground text-xs font-medium">Connect</Text>
+            <Text className="text-primary-foreground text-xs font-medium">{t('conn.connect')}</Text>
           </Pressable>
         )}
         {conn.status === 'connecting' && (
           <View className="bg-muted flex-1 flex-row items-center justify-center gap-1.5 rounded-md py-2">
             <ActivityIndicator size="small" />
-            <Text className="text-muted-foreground text-xs">Connecting...</Text>
+            <Text className="text-muted-foreground text-xs">{t('conn.connecting')}</Text>
           </View>
         )}
         {conn.status === 'connected' && (
           <View className="bg-muted flex-1 flex-row items-center justify-center gap-1.5 rounded-md py-2">
             <Icon as={WifiIcon} className="size-3.5 text-green-600" />
-            <Text className="text-xs font-medium text-green-600">Connected</Text>
+            <Text className="text-xs font-medium text-green-600">{t('conn.connected')}</Text>
           </View>
         )}
         <Pressable
           onPress={onEdit}
           className="border-border flex-row items-center gap-1.5 rounded-md border px-3 py-2">
           <Icon as={PencilIcon} className="text-muted-foreground size-3.5" />
-          <Text className="text-foreground text-xs">Edit</Text>
+          <Text className="text-foreground text-xs">{t('edit')}</Text>
         </Pressable>
         <Pressable
           onPress={onDelete}
@@ -175,8 +174,10 @@ function ConnectionCard({
 
 // ── Export / Import helpers ───────────────────────────────────────────────
 
+import { encryptConfig, decryptConfig } from '@/lib/crypto';
+
 interface ExportPayload {
-  version: 1;
+  version: 2;
   exportedAt: string;
   connections: Array<{
     displayName: string;
@@ -184,28 +185,59 @@ interface ExportPayload {
   }>;
 }
 
-function buildExportPayload(connections: S3Connection[]): ExportPayload {
-  return {
-    version: 1,
+interface EncryptedFile {
+  app: 's3man';
+  version: 2;
+  exportedAt: string;
+  data: string; // encrypted base64
+}
+
+function buildEncryptedFile(connections: S3Connection[]): EncryptedFile {
+  const payload: ExportPayload = {
+    version: 2,
     exportedAt: new Date().toISOString(),
     connections: connections.map((c) => ({
       displayName: c.displayName,
       config: c.config,
     })),
   };
+  return {
+    app: 's3man',
+    version: 2,
+    exportedAt: payload.exportedAt,
+    data: encryptConfig(JSON.stringify(payload)),
+  };
 }
 
-function parseImportPayload(json: string): ExportPayload {
-  const data = JSON.parse(json);
-  if (!data || data.version !== 1 || !Array.isArray(data.connections)) {
-    throw new Error('Invalid config file format');
-  }
-  for (const conn of data.connections) {
-    if (!conn.displayName || !conn.config?.accessKeyId || !conn.config?.secretAccessKey) {
-      throw new Error('Config file contains invalid connection entries');
+function parseImportFile(content: string): ExportPayload {
+  const file = JSON.parse(content);
+
+  // v2 encrypted format
+  if (file && file.app === 's3man' && file.version === 2 && typeof file.data === 'string') {
+    const decrypted = decryptConfig(file.data);
+    const payload = JSON.parse(decrypted);
+    if (!payload || !Array.isArray(payload.connections)) {
+      throw new Error('Invalid decrypted config data');
     }
+    for (const conn of payload.connections) {
+      if (!conn.displayName || !conn.config?.accessKeyId || !conn.config?.secretAccessKey) {
+        throw new Error('Config file contains invalid connection entries');
+      }
+    }
+    return payload as ExportPayload;
   }
-  return data as ExportPayload;
+
+  // v1 legacy plain JSON format (backward compatible)
+  if (file && file.version === 1 && Array.isArray(file.connections)) {
+    for (const conn of file.connections) {
+      if (!conn.displayName || !conn.config?.accessKeyId || !conn.config?.secretAccessKey) {
+        throw new Error('Config file contains invalid connection entries');
+      }
+    }
+    return { ...file, version: 2 } as ExportPayload;
+  }
+
+  throw new Error('Invalid config file format');
 }
 
 // ── Main Connections Screen ──────────────────────────────────────────────
@@ -213,6 +245,7 @@ function parseImportPayload(json: string): ExportPayload {
 export default function ConnectionsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const t = useT();
   const { connections, addConnection, updateConnection, removeConnection, connectOne } =
     useConnectionStore();
 
@@ -241,8 +274,9 @@ export default function ConnectionsScreen() {
   // Export/Import state
   const [isExporting, setIsExporting] = React.useState(false);
   const [isImporting, setIsImporting] = React.useState(false);
-  const [importResult, setImportResult] = React.useState<string | null>(null);
-  const [copiedExport, setCopiedExport] = React.useState(false);
+  const [importResult, setImportResult] = React.useState<{ text: string; success: boolean } | null>(
+    null
+  );
 
   const provider = getProvider(formConfig.provider);
 
@@ -337,7 +371,7 @@ export default function ConnectionsScreen() {
         setSelectedBuckets(new Set(bucketNames));
       }
     } catch (error: any) {
-      setDiscoverError(error.message || 'Failed to list buckets. Check credentials and try again.');
+      setDiscoverError(error.message || t('form.discoverFailed'));
       setDiscoveredBuckets([]);
     } finally {
       setIsDiscovering(false);
@@ -366,7 +400,7 @@ export default function ConnectionsScreen() {
 
   const handleSave = async () => {
     if (!formConfig.accessKeyId || !formConfig.secretAccessKey) {
-      setFormError('Please fill in Access Key ID and Secret Access Key');
+      setFormError(t('form.validationKeys'));
       return;
     }
     if (
@@ -374,7 +408,7 @@ export default function ConnectionsScreen() {
       !formConfig.accountId &&
       !formConfig.endpointUrl
     ) {
-      setFormError('Please enter your Cloudflare Account ID');
+      setFormError(t('form.validationAccountId'));
       return;
     }
     const name = displayName.trim() || provider.label;
@@ -415,7 +449,7 @@ export default function ConnectionsScreen() {
       setShowForm(false);
       resetForm();
     } catch (error: any) {
-      setFormError(error.message || 'Connection failed');
+      setFormError(error.message || t('form.connectionFailed'));
     } finally {
       setIsSaving(false);
     }
@@ -440,41 +474,24 @@ export default function ConnectionsScreen() {
     if (connections.length === 0) return;
     setIsExporting(true);
     try {
-      const payload = buildExportPayload(connections);
-      const json = JSON.stringify(payload, null, 2);
-      const fileName = `s3man-config-${new Date().toISOString().slice(0, 10)}.json`;
+      const encrypted = buildEncryptedFile(connections);
+      const json = JSON.stringify(encrypted);
+      const fileName = `s3man-config-${new Date().toISOString().slice(0, 10)}.s3man`;
       const fileUri = FileSystem.cacheDirectory + fileName;
       await FileSystem.writeAsStringAsync(fileUri, json);
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
         await Sharing.shareAsync(fileUri, {
-          mimeType: 'application/json',
+          mimeType: 'application/octet-stream',
           dialogTitle: 'Export S3Man Config',
-          UTI: 'public.json',
         });
       } else {
-        // Fallback: copy to clipboard
-        await Clipboard.setStringAsync(json);
-        setCopiedExport(true);
-        setTimeout(() => setCopiedExport(false), 2000);
+        Alert.alert(t('data.shareUnavailable'), t('data.shareUnavailableDesc'));
       }
     } catch (error: any) {
-      Alert.alert('Export Failed', error.message || 'Could not export config');
+      Alert.alert(t('data.exportFailed'), error.message || t('data.exportFailedDesc'));
     } finally {
       setIsExporting(false);
-    }
-  }, [connections]);
-
-  const handleCopyToClipboard = React.useCallback(async () => {
-    if (connections.length === 0) return;
-    try {
-      const payload = buildExportPayload(connections);
-      const json = JSON.stringify(payload, null, 2);
-      await Clipboard.setStringAsync(json);
-      setCopiedExport(true);
-      setTimeout(() => setCopiedExport(false), 2000);
-    } catch (error: any) {
-      Alert.alert('Copy Failed', error.message || 'Could not copy config');
     }
   }, [connections]);
 
@@ -483,7 +500,7 @@ export default function ConnectionsScreen() {
     setImportResult(null);
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/json',
+        type: '*/*',
         copyToCacheDirectory: true,
       });
       if (result.canceled || !result.assets?.length) {
@@ -492,8 +509,8 @@ export default function ConnectionsScreen() {
       }
       const fileUri = result.assets[0].uri;
       const response = await fetch(fileUri);
-      const json = await response.text();
-      const payload = parseImportPayload(json);
+      const content = await response.text();
+      const payload = parseImportFile(content);
       let imported = 0;
       for (const entry of payload.connections) {
         try {
@@ -505,48 +522,12 @@ export default function ConnectionsScreen() {
       }
       setImportResult(
         imported > 0
-          ? `Successfully imported ${imported} connection${imported > 1 ? 's' : ''}`
-          : 'No connections were imported (all failed to connect)'
+          ? { text: t('data.importSuccess', { count: imported }), success: true }
+          : { text: t('data.importNone'), success: false }
       );
       setTimeout(() => setImportResult(null), 4000);
     } catch (error: any) {
-      setImportResult(error.message || 'Import failed');
-      setTimeout(() => setImportResult(null), 4000);
-    } finally {
-      setIsImporting(false);
-    }
-  }, [addConnection]);
-
-  const handleImportClipboard = React.useCallback(async () => {
-    setIsImporting(true);
-    setImportResult(null);
-    try {
-      const hasString = await Clipboard.hasStringAsync();
-      if (!hasString) {
-        setImportResult('Clipboard is empty');
-        setTimeout(() => setImportResult(null), 3000);
-        setIsImporting(false);
-        return;
-      }
-      const json = await Clipboard.getStringAsync();
-      const payload = parseImportPayload(json);
-      let imported = 0;
-      for (const entry of payload.connections) {
-        try {
-          await addConnection(entry.displayName, entry.config);
-          imported++;
-        } catch {
-          // skip failed connections
-        }
-      }
-      setImportResult(
-        imported > 0
-          ? `Successfully imported ${imported} connection${imported > 1 ? 's' : ''}`
-          : 'No connections were imported (all failed to connect)'
-      );
-      setTimeout(() => setImportResult(null), 4000);
-    } catch (error: any) {
-      setImportResult(error.message || 'Import failed — clipboard may not contain valid config');
+      setImportResult({ text: error.message || t('data.importFailed'), success: false });
       setTimeout(() => setImportResult(null), 4000);
     } finally {
       setIsImporting(false);
@@ -571,7 +552,7 @@ export default function ConnectionsScreen() {
               <Icon as={XIcon} className="text-foreground size-6" />
             </Pressable>
             <Text className="text-foreground flex-1 text-xl font-bold">
-              {editingId ? 'Edit Connection' : 'New Connection'}
+              {editingId ? t('conn.editConnection') : t('conn.newConnection')}
             </Text>
           </View>
 
@@ -584,9 +565,9 @@ export default function ConnectionsScreen() {
 
           {/* Display Name */}
           <View className="mb-4 gap-2">
-            <Label>Display Name</Label>
+            <Label>{t('form.displayName')}</Label>
             <Input
-              placeholder="e.g. Production R2"
+              placeholder={t('form.displayNamePlaceholder')}
               value={displayName}
               onChangeText={setDisplayName}
               autoCapitalize="none"
@@ -595,7 +576,7 @@ export default function ConnectionsScreen() {
 
           {/* Provider */}
           <View className="mb-4 gap-2">
-            <Label>Provider</Label>
+            <Label>{t('form.provider')}</Label>
             <Pressable
               onPress={() => setShowProviderPicker(!showProviderPicker)}
               className="border-input bg-background dark:bg-input/30 flex-row items-center justify-between rounded-md border px-3 py-2.5">
@@ -641,7 +622,7 @@ export default function ConnectionsScreen() {
           {/* Account ID (R2) */}
           {provider.needsAccountId && (
             <View className="mb-4 gap-2">
-              <Label>Account ID</Label>
+              <Label>{t('form.accountId')}</Label>
               <Input
                 placeholder="e.g. a1b2c3d4e5f6..."
                 value={formConfig.accountId ?? ''}
@@ -649,9 +630,7 @@ export default function ConnectionsScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              <Text className="text-muted-foreground text-xs">
-                Find in Cloudflare Dashboard → R2 → Overview
-              </Text>
+              <Text className="text-muted-foreground text-xs">{t('form.accountIdHelp')}</Text>
             </View>
           )}
 
@@ -660,7 +639,9 @@ export default function ConnectionsScreen() {
             <Label>
               Endpoint URL{' '}
               {formConfig.provider !== 'custom' && (
-                <Text className="text-muted-foreground text-xs">(auto, override optional)</Text>
+                <Text className="text-muted-foreground text-xs">
+                  {t('form.endpointAutoOverride')}
+                </Text>
               )}
             </Label>
             <View className="flex-row items-center gap-0">
@@ -690,7 +671,9 @@ export default function ConnectionsScreen() {
               />
             </View>
             {effectiveEndpoint && !formConfig.endpointUrl ? (
-              <Text className="text-muted-foreground text-xs">Will use: {effectiveEndpoint}</Text>
+              <Text className="text-muted-foreground text-xs">
+                {t('form.willUse', { url: effectiveEndpoint })}
+              </Text>
             ) : null}
           </View>
 
@@ -711,23 +694,20 @@ export default function ConnectionsScreen() {
               autoCorrect={false}
             />
             {formConfig.provider === 'backblaze-b2' && (
-              <Text className="text-muted-foreground text-xs">
-                Use Master Application Key ID to access all buckets. Find in B2 Cloud Storage → App
-                Keys.
-              </Text>
+              <Text className="text-muted-foreground text-xs">{t('form.b2KeyIdHelp')}</Text>
             )}
           </View>
 
           {/* Secret Access Key */}
           <View className="mb-4 gap-2">
-            <Label>Secret Access Key</Label>
+            <Label>{t('form.secretAccessKey')}</Label>
             <View className="flex-row items-center gap-0">
               <Input
                 className="flex-1 rounded-r-none"
                 placeholder={
                   formConfig.provider === 'backblaze-b2'
-                    ? 'B2 Master Application Key'
-                    : 'Enter your secret key'
+                    ? t('form.b2SecretPlaceholder')
+                    : t('form.secretPlaceholder')
                 }
                 value={formConfig.secretAccessKey}
                 onChangeText={(text) => setFormConfig((p) => ({ ...p, secretAccessKey: text }))}
@@ -745,15 +725,13 @@ export default function ConnectionsScreen() {
               </Pressable>
             </View>
             {formConfig.provider === 'backblaze-b2' && (
-              <Text className="text-muted-foreground text-xs">
-                The Master Application Key is only shown once when created. Save it securely.
-              </Text>
+              <Text className="text-muted-foreground text-xs">{t('form.b2SecretHelp')}</Text>
             )}
           </View>
 
           {/* Region */}
           <View className="mb-6 gap-2">
-            <Label>Region</Label>
+            <Label>{t('form.region')}</Label>
             <Pressable
               onPress={() => setShowRegionPicker(!showRegionPicker)}
               className="border-input bg-background dark:bg-input/30 flex-row items-center justify-between rounded-md border px-3 py-2.5">
@@ -794,7 +772,8 @@ export default function ConnectionsScreen() {
           {/* Proxy URL (optional) */}
           <View className="mb-4 gap-2">
             <Label>
-              Proxy URL <Text className="text-muted-foreground text-xs">(optional)</Text>
+              {t('form.proxyUrl')}{' '}
+              <Text className="text-muted-foreground text-xs">{t('form.optional')}</Text>
             </Label>
             <Input
               placeholder="https://files.yourdomain.com"
@@ -803,18 +782,15 @@ export default function ConnectionsScreen() {
               autoCapitalize="none"
               autoCorrect={false}
             />
-            <Text className="text-muted-foreground text-xs">
-              Cloudflare Worker proxy for faster access and clean URLs. Leave empty to use presigned
-              S3 URLs.
-            </Text>
+            <Text className="text-muted-foreground text-xs">{t('form.proxyUrlHelp')}</Text>
           </View>
 
           {/* Proxy Token (shown when proxy URL is set) */}
           {!!formConfig.proxyUrl && (
             <View className="mb-4 gap-2">
-              <Label>Proxy Token</Label>
+              <Label>{t('form.proxyToken')}</Label>
               <Input
-                placeholder="Bearer token for proxy auth"
+                placeholder={t('form.proxyTokenPlaceholder')}
                 value={formConfig.proxyToken ?? ''}
                 onChangeText={(text) => setFormConfig((p) => ({ ...p, proxyToken: text }))}
                 secureTextEntry
@@ -828,7 +804,8 @@ export default function ConnectionsScreen() {
           {!!formConfig.proxyUrl && (
             <View className="mb-6 gap-2">
               <Label>
-                Proxy Alias <Text className="text-muted-foreground text-xs">(optional)</Text>
+                {t('form.proxyAlias')}{' '}
+                <Text className="text-muted-foreground text-xs">{t('form.optional')}</Text>
               </Label>
               <Input
                 placeholder="b2"
@@ -837,27 +814,28 @@ export default function ConnectionsScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              <Text className="text-muted-foreground text-xs">
-                Short name for clean share URLs. e.g. "b2" → proxy.com/b2/bucket/file.png
-              </Text>
+              <Text className="text-muted-foreground text-xs">{t('form.proxyAliasHelp')}</Text>
             </View>
           )}
 
           {/* Bucket Discovery */}
           <View className="mb-6 gap-3">
             <View className="flex-row items-center justify-between">
-              <Label>Discover Buckets</Label>
+              <Label>{t('form.discoverBuckets')}</Label>
               {discoveredBuckets.length > 0 && (
                 <Text className="text-muted-foreground text-xs">
-                  {selectedBuckets.size}/{discoveredBuckets.length} selected
+                  {t('form.selectedCount', {
+                    selected: selectedBuckets.size,
+                    total: discoveredBuckets.length,
+                  })}
                 </Text>
               )}
             </View>
 
             <Text className="text-muted-foreground -mt-1 text-xs">
               {formConfig.provider === 'backblaze-b2'
-                ? 'Use Master Application Key to list all buckets. Select which ones to add.'
-                : 'Fetch available buckets to choose which ones to show. Leave all selected to show everything.'}
+                ? t('form.discoverHelpR2')
+                : t('form.discoverHelpGeneric')}
             </Text>
 
             <Button
@@ -870,7 +848,7 @@ export default function ConnectionsScreen() {
               ) : (
                 <Icon as={SearchIcon} className="text-foreground size-4" />
               )}
-              <Text>{isDiscovering ? 'Discovering...' : 'Discover Buckets'}</Text>
+              <Text>{isDiscovering ? t('form.discovering') : t('form.discoverBuckets')}</Text>
             </Button>
 
             {discoverError ? (
@@ -884,14 +862,18 @@ export default function ConnectionsScreen() {
                 {/* Select / Deselect All */}
                 <View className="border-border flex-row items-center justify-between border-b px-3 py-2">
                   <Text className="text-muted-foreground text-xs font-medium">
-                    {discoveredBuckets.length} bucket{discoveredBuckets.length > 1 ? 's' : ''} found
+                    {t('form.discoveredCount', { count: discoveredBuckets.length })}
                   </Text>
                   <View className="flex-row gap-3">
                     <Pressable onPress={selectAllBuckets}>
-                      <Text className="text-primary text-xs font-medium">All</Text>
+                      <Text className="text-primary text-xs font-medium">
+                        {t('form.selectAll')}
+                      </Text>
                     </Pressable>
                     <Pressable onPress={deselectAllBuckets}>
-                      <Text className="text-primary text-xs font-medium">None</Text>
+                      <Text className="text-primary text-xs font-medium">
+                        {t('form.deselectAll')}
+                      </Text>
                     </Pressable>
                   </View>
                 </View>
@@ -923,14 +905,14 @@ export default function ConnectionsScreen() {
           {/* Save / Cancel */}
           <View className="flex-row gap-3">
             <Button variant="outline" onPress={handleCancel} className="flex-1">
-              <Text>Cancel</Text>
+              <Text>{t('cancel')}</Text>
             </Button>
             <Button onPress={handleSave} disabled={isSaving} className="flex-1">
               {isSaving ? (
                 <ActivityIndicator size="small" color="white" />
               ) : (
                 <Text className="text-primary-foreground font-semibold" numberOfLines={1}>
-                  {editingId ? 'Save' : 'Reconnect'}
+                  {editingId ? t('save') : t('conn.connect')}
                 </Text>
               )}
             </Button>
@@ -950,7 +932,7 @@ export default function ConnectionsScreen() {
           <Pressable onPress={() => router.back()} className="active:bg-accent rounded-lg p-1">
             <Icon as={ChevronLeftIcon} className="text-foreground size-6" />
           </Pressable>
-          <Text className="text-foreground flex-1 text-xl font-bold">Connections</Text>
+          <Text className="text-foreground flex-1 text-xl font-bold">{t('conn.title')}</Text>
           <Badge variant="secondary" className="shrink-0">
             <Text>
               {connectedCount}/{connections.length}
@@ -966,9 +948,9 @@ export default function ConnectionsScreen() {
         {connections.length === 0 ? (
           <View className="border-border bg-card items-center rounded-xl border py-16">
             <Icon as={WifiOffIcon} className="text-muted-foreground mb-3 size-12" />
-            <Text className="text-foreground text-base font-medium">No Connections</Text>
+            <Text className="text-foreground text-base font-medium">{t('conn.noConnections')}</Text>
             <Text className="text-muted-foreground mt-1 text-center text-sm">
-              Add a storage provider to get started.
+              {t('conn.noConnectionsDesc')}
             </Text>
           </View>
         ) : (
@@ -988,96 +970,67 @@ export default function ConnectionsScreen() {
         {/* Add Connection Button */}
         <Button onPress={openAddForm} className="mt-4 w-full flex-row items-center gap-2" size="lg">
           <Icon as={PlusIcon} className="text-primary-foreground size-5" />
-          <Text className="text-primary-foreground font-semibold">Add Connection</Text>
+          <Text className="text-primary-foreground font-semibold">{t('conn.addConnection')}</Text>
         </Button>
 
         {/* ── Data Section: Export / Import ──────────────────────────────── */}
         <Separator className="my-6" />
 
         <View className="mb-4">
-          <Text className="text-foreground text-lg font-semibold">Data</Text>
-          <Text className="text-muted-foreground mt-1 text-sm">
-            Export or import connection configs between devices.
-          </Text>
-          <Text className="text-muted-foreground mt-0.5 text-xs">
-            Exported files contain credentials (access keys). Handle with care.
-          </Text>
+          <Text className="text-foreground text-lg font-semibold">{t('data.title')}</Text>
+          <Text className="text-muted-foreground mt-1 text-sm">{t('data.desc')}</Text>
+          <Text className="text-muted-foreground mt-0.5 text-xs">{t('data.warning')}</Text>
         </View>
 
         {/* Import result banner */}
         {importResult && (
           <View
             className={`mb-3 rounded-lg p-3 ${
-              importResult.startsWith('Successfully') ? 'bg-green-500/10' : 'bg-destructive/10'
+              importResult.success ? 'bg-green-500/10' : 'bg-destructive/10'
             }`}>
             <Text
-              className={`text-sm ${
-                importResult.startsWith('Successfully') ? 'text-green-600' : 'text-destructive'
-              }`}>
-              {importResult}
+              className={`text-sm ${importResult.success ? 'text-green-600' : 'text-destructive'}`}>
+              {importResult.text}
             </Text>
           </View>
         )}
 
-        {/* Export Buttons */}
+        {/* Export Button */}
         <View className="mb-3 gap-2">
-          <Text className="text-muted-foreground mb-1 text-xs font-medium tracking-wider uppercase">
-            Export
+          <Text className="text-muted-foreground mb-1 text-xs font-medium tracking-wider">
+            {t('data.export')}
           </Text>
-          <View className="flex-row gap-2">
-            <Button
-              variant="outline"
-              onPress={handleExportFile}
-              disabled={connections.length === 0 || isExporting}
-              className="flex-1 flex-row items-center gap-2">
-              {isExporting ? (
-                <ActivityIndicator size="small" />
-              ) : (
-                <Icon as={ShareIcon} className="text-foreground size-4" />
-              )}
-              <Text>Share File</Text>
-            </Button>
-            <Button
-              variant="outline"
-              onPress={handleCopyToClipboard}
-              disabled={connections.length === 0}
-              className="flex-1 flex-row items-center gap-2">
-              <Icon
-                as={copiedExport ? CheckIcon : CopyIcon}
-                className={`size-4 ${copiedExport ? 'text-green-600' : 'text-foreground'}`}
-              />
-              <Text>{copiedExport ? 'Copied!' : 'Copy JSON'}</Text>
-            </Button>
-          </View>
+          <Button
+            variant="outline"
+            onPress={handleExportFile}
+            disabled={connections.length === 0 || isExporting}
+            className="flex-row items-center gap-2">
+            {isExporting ? (
+              <ActivityIndicator size="small" />
+            ) : (
+              <Icon as={ShareIcon} className="text-foreground size-4" />
+            )}
+            <Text>{t('data.exportConfig')}</Text>
+          </Button>
         </View>
 
-        {/* Import Buttons */}
+        {/* Import Button */}
         <View className="gap-2">
-          <Text className="text-muted-foreground mb-1 text-xs font-medium tracking-wider uppercase">
-            Import
+          <Text className="text-muted-foreground mb-1 text-xs font-medium tracking-wider">
+            {t('data.import')}
           </Text>
-          <View className="flex-row gap-2">
-            <Button
-              variant="outline"
-              onPress={handleImportFile}
-              disabled={isImporting}
-              className="flex-1 flex-row items-center gap-2">
-              {isImporting ? (
-                <ActivityIndicator size="small" />
-              ) : (
-                <Icon as={DownloadIcon} className="text-foreground size-4" />
-              )}
-              <Text>From File</Text>
-            </Button>
-            <Button
-              variant="outline"
-              onPress={handleImportClipboard}
-              disabled={isImporting}
-              className="flex-1 flex-row items-center gap-2">
-              <Icon as={ClipboardPasteIcon} className="text-foreground size-4" />
-              <Text>From Clipboard</Text>
-            </Button>
-          </View>
+          <Button
+            variant="outline"
+            onPress={handleImportFile}
+            disabled={isImporting}
+            className="flex-row items-center gap-2">
+            {isImporting ? (
+              <ActivityIndicator size="small" />
+            ) : (
+              <Icon as={DownloadIcon} className="text-foreground size-4" />
+            )}
+            <Text>{t('data.importConfig')}</Text>
+          </Button>
         </View>
       </ScrollView>
 
@@ -1085,9 +1038,9 @@ export default function ConnectionsScreen() {
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Connection</AlertDialogTitle>
+            <AlertDialogTitle>{t('conn.deleteTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Remove "{deleteTarget?.displayName}"? This cannot be undone.
+              {t('conn.deleteDesc', { name: deleteTarget?.displayName ?? '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1096,10 +1049,10 @@ export default function ConnectionsScreen() {
                 setShowDeleteDialog(false);
                 setDeleteTarget(null);
               }}>
-              <Text>Cancel</Text>
+              <Text>{t('cancel')}</Text>
             </AlertDialogCancel>
             <AlertDialogAction variant="destructive" onPress={confirmDelete}>
-              <Text>Delete</Text>
+              <Text>{t('delete')}</Text>
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

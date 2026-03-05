@@ -22,6 +22,7 @@ import {
 import React from 'react';
 import { View, Image } from 'react-native';
 import { getFileExtension } from '@/lib/constants';
+import { t } from '@/lib/i18n';
 import type { LucideIcon } from 'lucide-react-native';
 
 function getTransferIcon(fileName: string): LucideIcon {
@@ -77,22 +78,26 @@ export const TransferItem = React.memo(function TransferItem({
 
   const progressText = React.useMemo(() => {
     if (isCompleted) {
-      return `Completed • ${formatBytes(task.totalBytes)}`;
+      return t('transfers.completedStatus', { size: formatBytes(task.totalBytes) });
     }
     if (isFailed) {
-      return task.error || 'Failed';
+      return task.error || t('transfers.failed');
     }
     if (isPaused) {
-      return `Stopped at ${formatBytes(task.transferredBytes)}`;
+      return t('transfers.stoppedAt', { size: formatBytes(task.transferredBytes) });
     }
     const remaining = task.totalBytes - task.transferredBytes;
     const estimatedSeconds =
       remaining > 0 ? Math.ceil(remaining / (task.transferredBytes / 10)) : 0;
     const timeStr =
       estimatedSeconds > 60
-        ? `${Math.ceil(estimatedSeconds / 60)} mins remaining`
-        : `${estimatedSeconds} secs remaining`;
-    return `${formatBytes(task.transferredBytes)} of ${formatBytes(task.totalBytes)} • ${timeStr}`;
+        ? t('transfers.minsRemaining', { mins: Math.ceil(estimatedSeconds / 60) })
+        : t('transfers.secsRemaining', { secs: estimatedSeconds });
+    return t('transfers.progressText', {
+      transferred: formatBytes(task.transferredBytes),
+      total: formatBytes(task.totalBytes),
+      time: timeStr,
+    });
   }, [task, isCompleted, isFailed, isPaused]);
 
   return (
@@ -122,7 +127,7 @@ export const TransferItem = React.memo(function TransferItem({
           )}
           {isPaused && (
             <Text className="rounded bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300">
-              Paused
+              {t('transfers.paused')}
             </Text>
           )}
           {!isCompleted && !isFailed && (
@@ -149,7 +154,7 @@ export const TransferItem = React.memo(function TransferItem({
                 onPress={onPause}
                 className="flex-row items-center gap-1.5">
                 <Icon as={PauseIcon} className="text-foreground size-3.5" />
-                <Text>Pause</Text>
+                <Text>{t('transfers.pause')}</Text>
               </Button>
             )}
             {isPaused && (
@@ -159,7 +164,7 @@ export const TransferItem = React.memo(function TransferItem({
                 onPress={onResume}
                 className="flex-row items-center gap-1.5">
                 <Icon as={PlayIcon} className="text-foreground size-3.5" />
-                <Text>Resume</Text>
+                <Text>{t('transfers.resume')}</Text>
               </Button>
             )}
             {isActive && (
@@ -169,7 +174,7 @@ export const TransferItem = React.memo(function TransferItem({
                 onPress={onCancel}
                 className="flex-row items-center gap-1.5">
                 <Icon as={XIcon} className="text-destructive size-3.5" />
-                <Text className="text-destructive">Cancel</Text>
+                <Text className="text-destructive">{t('cancel')}</Text>
               </Button>
             )}
             {isPaused && (
@@ -179,7 +184,7 @@ export const TransferItem = React.memo(function TransferItem({
                 onPress={onRemove}
                 className="flex-row items-center gap-1.5">
                 <Icon as={Trash2Icon} className="text-destructive size-3.5" />
-                <Text className="text-destructive">Remove</Text>
+                <Text className="text-destructive">{t('transfers.remove')}</Text>
               </Button>
             )}
           </View>

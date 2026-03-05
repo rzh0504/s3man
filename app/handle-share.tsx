@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { getSharedPayloads } from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
+import { useT } from '@/lib/i18n';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ interface FileUploadState {
 export default function HandleShareScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const t = useT();
   const connections = useConnectionStore((s) => s.connections);
   const connectedConns = connections.filter((c) => c.status === 'connected');
   const addTask = useTransferStore((s) => s.addTask);
@@ -132,7 +134,7 @@ export default function HandleShareScreen() {
       .then((b) => setBuckets(b))
       .catch((e) => {
         console.error('Failed to list buckets:', e);
-        Alert.alert('Error', 'Failed to load buckets');
+        Alert.alert(t('share.error'), t('share.loadBucketsFailed'));
       })
       .finally(() => setBucketsLoading(false));
   }, [selectedConnectionId]);
@@ -275,12 +277,12 @@ export default function HandleShareScreen() {
           className="bg-background flex-1 items-center justify-center px-8"
           style={{ paddingTop: insets.top }}>
           <Icon as={FileIcon} className="text-muted-foreground mb-4 size-16" />
-          <Text className="text-foreground mb-2 text-lg font-semibold">No files to upload</Text>
+          <Text className="text-foreground mb-2 text-lg font-semibold">{t('share.noFiles')}</Text>
           <Text className="text-muted-foreground mb-6 text-center text-sm">
-            No compatible files were shared with S3Man.
+            {t('share.noFilesDesc')}
           </Text>
           <Button onPress={handleClose}>
-            <Text className="text-primary-foreground">Go Back</Text>
+            <Text className="text-primary-foreground">{t('share.goBack')}</Text>
           </Button>
         </View>
       </>
@@ -296,7 +298,7 @@ export default function HandleShareScreen() {
           <Pressable onPress={handleClose} className="rounded-md p-1">
             <Icon as={XIcon} className="text-foreground size-6" />
           </Pressable>
-          <Text className="text-foreground text-lg font-semibold">Upload Shared Files</Text>
+          <Text className="text-foreground text-lg font-semibold">{t('share.uploadTitle')}</Text>
           <View className="size-8" />
         </View>
 
@@ -306,7 +308,7 @@ export default function HandleShareScreen() {
           {/* Shared files list */}
           <View className="px-4 pt-4 pb-2">
             <Text className="text-muted-foreground mb-2 text-xs font-medium tracking-wider uppercase">
-              {sharedFiles.length} file{sharedFiles.length > 1 ? 's' : ''} to upload
+              {t('share.fileCount', { count: sharedFiles.length })}
             </Text>
             {sharedFiles.map((file, i) => {
               const state = fileStates[i];
@@ -343,12 +345,12 @@ export default function HandleShareScreen() {
           {/* Connection selector */}
           <View className="px-4 pt-4 pb-2">
             <Text className="text-muted-foreground mb-2 text-xs font-medium tracking-wider uppercase">
-              Destination Connection
+              {t('share.destConnection')}
             </Text>
             {connectedConns.length === 0 ? (
               <View className="rounded-lg border border-dashed border-yellow-500/40 bg-yellow-500/10 p-4">
                 <Text className="text-foreground text-center text-sm">
-                  No connected providers. Please configure a connection first.
+                  {t('share.noProviders')}
                 </Text>
               </View>
             ) : (
@@ -386,13 +388,13 @@ export default function HandleShareScreen() {
               <Separator className="mx-4" />
               <View className="px-4 pt-4 pb-2">
                 <Text className="text-muted-foreground mb-2 text-xs font-medium tracking-wider uppercase">
-                  Destination Bucket
+                  {t('share.destBucket')}
                 </Text>
                 {bucketsLoading ? (
                   <ActivityIndicator className="py-4" />
                 ) : buckets.length === 0 ? (
                   <Text className="text-muted-foreground py-4 text-center text-sm">
-                    No buckets found
+                    {t('share.noBuckets')}
                   </Text>
                 ) : (
                   buckets.map((bucket) => {
@@ -429,7 +431,7 @@ export default function HandleShareScreen() {
           {uploadDone ? (
             <Button onPress={handleClose} className="flex-row items-center justify-center gap-2">
               <Icon as={CheckCircle2Icon} className="text-primary-foreground size-5" />
-              <Text className="text-primary-foreground font-semibold">Done</Text>
+              <Text className="text-primary-foreground font-semibold">{t('share.done')}</Text>
             </Button>
           ) : (
             <Button
@@ -442,7 +444,11 @@ export default function HandleShareScreen() {
                 <Icon as={UploadCloudIcon} className="text-primary-foreground size-5" />
               )}
               <Text className="text-primary-foreground font-semibold">
-                {isUploading ? 'Uploading...' : `Upload to ${selectedBucket ?? 'Select a bucket'}`}
+                {isUploading
+                  ? t('share.uploading')
+                  : selectedBucket
+                    ? t('share.uploadTo', { bucket: selectedBucket })
+                    : t('share.selectBucket')}
               </Text>
             </Button>
           )}

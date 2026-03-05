@@ -5,7 +5,15 @@ import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import { useConnectionStore } from '@/lib/stores/connection-store';
 import { useSettingsStore } from '@/lib/stores/settings-store';
-import { ChevronRightIcon, SettingsIcon, SunIcon, MoonIcon, WifiIcon } from 'lucide-react-native';
+import { useT } from '@/lib/i18n';
+import {
+  ChevronRightIcon,
+  SettingsIcon,
+  SunIcon,
+  MoonIcon,
+  WifiIcon,
+  LanguagesIcon,
+} from 'lucide-react-native';
 
 import * as React from 'react';
 import { View, ScrollView, Pressable } from 'react-native';
@@ -24,8 +32,9 @@ export default function ConfigScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUniwind();
+  const t = useT();
   const connections = useConnectionStore((s) => s.connections);
-  const { showThumbnails, setShowThumbnails } = useSettingsStore();
+  const { showThumbnails, setShowThumbnails, language, setLanguage } = useSettingsStore();
 
   const connectedCount = connections.filter((c) => c.status === 'connected').length;
 
@@ -43,13 +52,17 @@ export default function ConfigScreen() {
     Uniwind.setTheme(theme === 'dark' ? 'light' : 'dark');
   }, [theme, themeScale]);
 
+  const toggleLanguage = React.useCallback(() => {
+    setLanguage(language === 'zh' ? 'en' : 'zh');
+  }, [language, setLanguage]);
+
   return (
     <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
       {/* Header */}
       <View className="px-6 pt-4 pb-3">
         <View className="flex-row items-center gap-2.5">
           <Icon as={SettingsIcon} className="text-foreground size-6" />
-          <Text className="text-foreground text-xl font-bold">Settings</Text>
+          <Text className="text-foreground text-xl font-bold">{t('settings.title')}</Text>
         </View>
       </View>
 
@@ -63,9 +76,11 @@ export default function ConfigScreen() {
           <View className="flex-row items-center gap-3 px-4 py-3.5">
             <Icon as={WifiIcon} className="text-foreground size-5" />
             <View className="flex-1">
-              <Text className="text-foreground text-sm font-medium">Connections</Text>
+              <Text className="text-foreground text-sm font-medium">
+                {t('settings.connections')}
+              </Text>
               <Text className="text-muted-foreground mt-0.5 text-xs">
-                Manage S3 storage providers
+                {t('settings.connectionsDesc')}
               </Text>
             </View>
             <Badge variant="secondary">
@@ -81,7 +96,7 @@ export default function ConfigScreen() {
         <Separator className="my-6" />
 
         <View className="mb-4">
-          <Text className="text-foreground text-lg font-semibold">General</Text>
+          <Text className="text-foreground text-lg font-semibold">{t('settings.general')}</Text>
         </View>
 
         <View className="border-border bg-card rounded-xl border">
@@ -90,9 +105,9 @@ export default function ConfigScreen() {
             onPress={toggleTheme}
             className="active:bg-accent flex-row items-center justify-between px-4 py-3.5">
             <View className="mr-4 flex-1">
-              <Text className="text-foreground text-sm font-medium">Dark Mode</Text>
+              <Text className="text-foreground text-sm font-medium">{t('settings.darkMode')}</Text>
               <Text className="text-muted-foreground mt-0.5 text-xs">
-                Switch between light and dark theme
+                {t('settings.darkModeDesc')}
               </Text>
             </View>
             <Animated.View style={themeIconStyle}>
@@ -110,15 +125,37 @@ export default function ConfigScreen() {
             onPress={() => setShowThumbnails(!showThumbnails)}
             className="active:bg-accent flex-row items-center justify-between px-4 py-3.5">
             <View className="mr-4 flex-1">
-              <Text className="text-foreground text-sm font-medium">Image Thumbnails</Text>
+              <Text className="text-foreground text-sm font-medium">
+                {t('settings.thumbnails')}
+              </Text>
               <Text className="text-muted-foreground mt-0.5 text-xs">
-                Show thumbnail previews for image files
+                {t('settings.thumbnailsDesc')}
               </Text>
             </View>
             <Checkbox
               checked={showThumbnails}
               onCheckedChange={(checked) => setShowThumbnails(!!checked)}
             />
+          </Pressable>
+
+          <Separator />
+
+          {/* Language */}
+          <Pressable
+            onPress={toggleLanguage}
+            className="active:bg-accent flex-row items-center justify-between px-4 py-3.5">
+            <View className="mr-4 flex-1">
+              <Text className="text-foreground text-sm font-medium">{t('settings.language')}</Text>
+              <Text className="text-muted-foreground mt-0.5 text-xs">
+                {t('settings.languageDesc')}
+              </Text>
+            </View>
+            <View className="flex-row items-center gap-2">
+              <Text className="text-muted-foreground text-sm">
+                {language === 'zh' ? t('settings.languageZh') : t('settings.languageEn')}
+              </Text>
+              <Icon as={LanguagesIcon} className="text-muted-foreground size-5" />
+            </View>
           </Pressable>
         </View>
       </ScrollView>

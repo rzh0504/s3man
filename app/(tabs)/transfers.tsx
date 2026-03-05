@@ -17,27 +17,32 @@ import * as React from 'react';
 import { View, FlatList, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import { useT } from '@/lib/i18n';
+import type { TranslationKey } from '@/lib/i18n';
 
-const TABS: { value: TransferFilter; label: string; shortLabel: string }[] = [
-  { value: 'all', label: 'All', shortLabel: 'All' },
-  { value: 'uploading', label: 'Uploading', shortLabel: 'Up' },
-  { value: 'downloading', label: 'Downloading', shortLabel: 'Down' },
-  { value: 'completed', label: 'Completed', shortLabel: 'Done' },
+const TABS: { value: TransferFilter; labelKey: TranslationKey; shortLabelKey: TranslationKey }[] = [
+  { value: 'all', labelKey: 'all', shortLabelKey: 'all' },
+  { value: 'uploading', labelKey: 'transfers.uploading', shortLabelKey: 'transfers.up' },
+  { value: 'downloading', labelKey: 'transfers.downloading', shortLabelKey: 'transfers.down' },
+  { value: 'completed', labelKey: 'transfers.completed', shortLabelKey: 'transfers.done' },
 ];
 
 const SPRING_CONFIG = { damping: 16, stiffness: 160 };
 
 function AnimatedTab({
-  label,
-  shortLabel,
+  labelKey,
+  shortLabelKey,
   isActive,
   onPress,
 }: {
-  label: string;
-  shortLabel: string;
+  labelKey: TranslationKey;
+  shortLabelKey: TranslationKey;
   isActive: boolean;
   onPress: () => void;
 }) {
+  const t = useT();
+  const label = t(labelKey);
+  const shortLabel = t(shortLabelKey);
   const animatedStyle = useAnimatedStyle(() => ({
     flex: withSpring(isActive ? 1.6 : 1, SPRING_CONFIG),
   }));
@@ -65,6 +70,7 @@ function AnimatedTab({
 
 export default function TransfersScreen() {
   const insets = useSafeAreaInsets();
+  const t = useT();
   const { tasks, filter, setFilter, filteredTasks, pauseTask, resumeTask, cancelTask, removeTask } =
     useTransferStore();
 
@@ -89,7 +95,7 @@ export default function TransfersScreen() {
       <View className="px-6 pt-4 pb-3">
         <View className="flex-row items-center gap-2.5">
           <Icon as={ArrowLeftRightIcon} className="text-foreground size-6" />
-          <Text className="text-foreground text-xl font-bold">Transfers</Text>
+          <Text className="text-foreground text-xl font-bold">{t('transfers.title')}</Text>
         </View>
       </View>
 
@@ -100,8 +106,8 @@ export default function TransfersScreen() {
         {TABS.map((tab) => (
           <AnimatedTab
             key={tab.value}
-            label={tab.label}
-            shortLabel={tab.shortLabel}
+            labelKey={tab.labelKey}
+            shortLabelKey={tab.shortLabelKey}
             isActive={filter === tab.value}
             onPress={() => setFilter(tab.value)}
           />
@@ -117,11 +123,11 @@ export default function TransfersScreen() {
         ListEmptyComponent={
           <EmptyState
             icon={ListIcon}
-            title="No Transfers"
+            title={t('transfers.noTransfers')}
             description={
               filter === 'all'
-                ? 'Upload or download files to see transfer progress here.'
-                : `No ${filter} transfers.`
+                ? t('transfers.noTransfersDesc')
+                : t('transfers.noFilteredDesc', { filter })
             }
           />
         }

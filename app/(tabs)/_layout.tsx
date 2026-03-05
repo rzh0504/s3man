@@ -7,23 +7,26 @@ import { View, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import { useT } from '@/lib/i18n';
+import type { TranslationKey } from '@/lib/i18n';
 
 // ── Custom Tab Bar ───────────────────────────────────────────────────────
 
 interface TabDef {
   key: string;
-  label: string;
+  labelKey: TranslationKey;
   icon: LucideIcon;
 }
 
 const TABS: TabDef[] = [
-  { key: 'index', label: 'Buckets', icon: DatabaseIcon },
-  { key: 'transfers', label: 'Transfers', icon: ArrowLeftRightIcon },
-  { key: 'config', label: 'Settings', icon: SettingsIcon },
+  { key: 'index', labelKey: 'tabs.buckets', icon: DatabaseIcon },
+  { key: 'transfers', labelKey: 'tabs.transfers', icon: ArrowLeftRightIcon },
+  { key: 'config', labelKey: 'tabs.settings', icon: SettingsIcon },
 ];
 
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const t = useT();
 
   return (
     <View className="border-border bg-background border-t" style={{ paddingBottom: insets.bottom }}>
@@ -63,7 +66,7 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
                 className={`mt-1 text-xs leading-tight ${
                   isFocused ? 'text-primary font-semibold' : 'text-muted-foreground font-medium'
                 }`}>
-                {tab.label}
+                {t(tab.labelKey)}
               </Text>
             </Pressable>
           );

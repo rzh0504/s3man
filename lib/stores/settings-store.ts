@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { useI18nStore, type Locale } from '@/lib/i18n';
 
 const STORAGE_KEY = 's3man_settings';
 
@@ -27,19 +28,24 @@ function saveToStorage(data: Record<string, unknown>) {
 
 interface SettingsState {
   showThumbnails: boolean;
+  language: Locale;
   isLoaded: boolean;
   loadSettings: () => Promise<void>;
   setShowThumbnails: (value: boolean) => void;
+  setLanguage: (value: Locale) => void;
 }
 
-export const useSettingsStore = create<SettingsState>((set) => ({
+export const useSettingsStore = create<SettingsState>((set, get) => ({
   showThumbnails: false,
+  language: 'zh',
   isLoaded: false,
 
   loadSettings: async () => {
     const data = await loadFromStorage();
     if (data) {
-      set({ showThumbnails: !!data.showThumbnails, isLoaded: true });
+      const lang = (data.language as Locale) || 'zh';
+      set({ showThumbnails: !!data.showThumbnails, language: lang, isLoaded: true });
+      useI18nStore.getState().setLocale(lang);
     } else {
       set({ isLoaded: true });
     }
@@ -47,6 +53,12 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
   setShowThumbnails: (value: boolean) => {
     set({ showThumbnails: value });
-    saveToStorage({ showThumbnails: value });
+    saveToStorage({ showThumbnails: value, language: get().language });
+  },
+
+  setLanguage: (value: Locale) => {
+    set({ language: value });
+    useI18nStore.getState().setLocale(value);
+    saveToStorage({ showThumbnails: get().showThumbnails, language: value });
   },
 }));

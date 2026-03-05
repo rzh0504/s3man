@@ -3,6 +3,7 @@ import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import type { BucketInfo } from '@/lib/types';
 import { formatDate } from '@/lib/constants';
+import { t } from '@/lib/i18n';
 import { DatabaseIcon } from 'lucide-react-native';
 import React from 'react';
 import { View, Pressable } from 'react-native';
@@ -27,7 +28,7 @@ export const BucketItem = React.memo(function BucketItem({
       <View className="flex-1 gap-0.5">
         <Text className="text-foreground text-sm font-medium">{bucket.name}</Text>
         <Text className="text-muted-foreground text-xs">
-          Created {formatDate(bucket.creationDate)}
+          {t('buckets.created', { date: formatDate(bucket.creationDate) })}
         </Text>
       </View>
       {bucket.region && (

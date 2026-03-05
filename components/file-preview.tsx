@@ -11,6 +11,7 @@ import { View, Modal, Pressable, Image, ScrollView, Dimensions, Platform } from 
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { t } from '@/lib/i18n';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -248,11 +249,11 @@ export function FilePreview({
               <View className="items-center gap-3 p-8">
                 <Icon as={ExternalLinkIcon} className="text-muted-foreground size-12" />
                 <Text className="text-muted-foreground text-center text-sm">
-                  Preview not available for this file type.
+                  {t('preview.notAvailable')}
                 </Text>
                 <Button onPress={onDownload} className="mt-2 flex-row items-center gap-2">
                   <Icon as={DownloadIcon} className="text-primary-foreground size-4" />
-                  <Text className="text-primary-foreground">Download File</Text>
+                  <Text className="text-primary-foreground">{t('preview.downloadFile')}</Text>
                 </Button>
               </View>
             )}
