@@ -2,7 +2,7 @@ import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Button } from '@/components/ui/button';
 import { formatBytes } from '@/lib/constants';
-import { isImageFile } from '@/lib/s3-service';
+import { isImageFile, isVideoFile, isCodeFile } from '@/lib/s3-service';
 import type { S3Object } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { XIcon, DownloadIcon, ExternalLinkIcon, LinkIcon } from 'lucide-react-native';
@@ -10,6 +10,7 @@ import * as React from 'react';
 import { View, Modal, Pressable, Image, ScrollView, Dimensions, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -31,6 +32,74 @@ interface FilePreviewProps {
 }
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const MAX_PREVIEW_WIDTH = SCREEN_WIDTH - 32;
+const SHEET_HEIGHT_SMALL = 280;
+const SHEET_HEIGHT_MEDIUM = Math.round(SCREEN_HEIGHT * 0.7);
+
+// ── Video Player Sub-component ──────────────────────────────────────────
+
+function VideoPreview({ url }: { url: string }) {
+  const player = useVideoPlayer(url, (p) => {
+    p.loop = false;
+  });
+
+  return (
+    <View className="w-full items-center justify-center p-4">
+      <VideoView
+        player={player}
+        style={{
+          width: MAX_PREVIEW_WIDTH,
+          height: MAX_PREVIEW_WIDTH * (9 / 16),
+          borderRadius: 12,
+        }}
+        nativeControls
+      />
+    </View>
+  );
+}
+
+// ── Dynamic Image Preview Sub-component ─────────────────────────────────
+
+function ImagePreview({ url }: { url: string }) {
+  const [size, setSize] = React.useState<{ w: number; h: number } | null>(null);
+
+  React.useEffect(() => {
+    Image.getSize(
+      url,
+      (w, h) => setSize({ w, h }),
+      () => setSize({ w: MAX_PREVIEW_WIDTH, h: MAX_PREVIEW_WIDTH })
+    );
+  }, [url]);
+
+  const displaySize = React.useMemo(() => {
+    if (!size) return { width: MAX_PREVIEW_WIDTH, height: MAX_PREVIEW_WIDTH };
+    const aspect = size.w / size.h;
+    const maxH = SCREEN_HEIGHT * 0.6;
+    let width = MAX_PREVIEW_WIDTH;
+    let height = width / aspect;
+    if (height > maxH) {
+      height = maxH;
+      width = height * aspect;
+    }
+    return { width, height };
+  }, [size]);
+
+  return (
+    <ScrollView
+      className="flex-1"
+      contentContainerClassName="flex-1 items-center justify-center p-4"
+      maximumZoomScale={5}
+      minimumZoomScale={1}>
+      <Image
+        source={{ uri: url }}
+        style={{ width: displaySize.width, height: displaySize.height, borderRadius: 8 }}
+        resizeMode="contain"
+      />
+    </ScrollView>
+  );
+}
+
+// ── Main FilePreview ────────────────────────────────────────────────────
 
 export function FilePreview({
   visible,
@@ -43,6 +112,18 @@ export function FilePreview({
   isLoading,
 }: FilePreviewProps) {
   const insets = useSafeAreaInsets();
+
+  const isImage = object ? isImageFile(object.name) : false;
+  const isVideo = object ? isVideoFile(object.name) : false;
+  const isCode = object ? isCodeFile(object.name) : false;
+  const hasPreviewContent = isImage || isVideo || isCode || textContent !== null;
+
+  const sheetHeight = React.useMemo(() => {
+    if (isLoading) return SHEET_HEIGHT_MEDIUM;
+    if (!hasPreviewContent) return SHEET_HEIGHT_SMALL + insets.bottom;
+    return SHEET_HEIGHT_MEDIUM;
+  }, [hasPreviewContent, isLoading, insets.bottom]);
+
   const translateY = useSharedValue(SCREEN_HEIGHT);
   const backdropOpacity = useSharedValue(0);
   const [modalVisible, setModalVisible] = React.useState(false);
@@ -53,18 +134,18 @@ export function FilePreview({
       translateY.value = SCREEN_HEIGHT;
       backdropOpacity.value = 0;
       requestAnimationFrame(() => {
-        translateY.value = withSpring(0, { damping: 22, stiffness: 220, mass: 0.8 });
-        backdropOpacity.value = withTiming(1, { duration: 250 });
+        translateY.value = withSpring(0, { damping: 25, stiffness: 300, mass: 0.7 });
+        backdropOpacity.value = withTiming(1, { duration: 150 });
       });
     } else {
       translateY.value = withTiming(
         SCREEN_HEIGHT,
-        { duration: 280, easing: Easing.bezier(0.4, 0, 1, 1) },
+        { duration: 200, easing: Easing.bezier(0.4, 0, 1, 1) },
         (finished) => {
           if (finished) runOnJS(setModalVisible)(false);
         }
       );
-      backdropOpacity.value = withTiming(0, { duration: 200 });
+      backdropOpacity.value = withTiming(0, { duration: 150 });
     }
   }, [visible]);
 
@@ -77,8 +158,6 @@ export function FilePreview({
   }));
 
   if (!object) return null;
-
-  const isImage = isImageFile(object.name);
 
   return (
     <Modal visible={modalVisible} animationType="none" transparent statusBarTranslucent>
@@ -98,10 +177,10 @@ export function FilePreview({
         style={[
           {
             position: 'absolute',
-            top: 56,
             left: 0,
             right: 0,
             bottom: 0,
+            height: sheetHeight,
           },
           sheetStyle,
         ]}>
@@ -140,7 +219,7 @@ export function FilePreview({
                 <View className="items-center justify-center p-4">
                   <Skeleton
                     className="rounded-lg"
-                    style={{ width: SCREEN_WIDTH - 32, height: SCREEN_WIDTH - 32 }}
+                    style={{ width: MAX_PREVIEW_WIDTH, height: MAX_PREVIEW_WIDTH * 0.75 }}
                   />
                 </View>
               ) : (
@@ -156,17 +235,9 @@ export function FilePreview({
                 </View>
               )
             ) : isImage && previewUrl ? (
-              <ScrollView
-                className="flex-1"
-                contentContainerClassName="flex-1 items-center justify-center p-4"
-                maximumZoomScale={5}
-                minimumZoomScale={1}>
-                <Image
-                  source={{ uri: previewUrl }}
-                  style={{ width: SCREEN_WIDTH - 32, height: SCREEN_WIDTH - 32 }}
-                  resizeMode="contain"
-                />
-              </ScrollView>
+              <ImagePreview url={previewUrl} />
+            ) : isVideo && previewUrl ? (
+              <VideoPreview url={previewUrl} />
             ) : textContent !== null ? (
               <ScrollView className="w-full flex-1" contentContainerClassName="p-4">
                 <View className="bg-muted rounded-lg p-4">

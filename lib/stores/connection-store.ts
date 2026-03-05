@@ -108,15 +108,13 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         const saved: SavedConnection[] = JSON.parse(json);
         const connections: S3Connection[] = saved.map((s) => ({
           ...s,
-          status: 'disconnected' as ConnectionStatus,
+          status: 'connected' as ConnectionStatus,
         }));
-        // Show connections immediately (with connecting shimmer)
+        // Create S3 clients without network test (verified on first bucket fetch)
+        for (const c of connections) {
+          S3Service.createClientForConnection(c.id, c.config);
+        }
         set({ connections, isInitializing: false });
-
-        // Auto-connect all in parallel
-        await Promise.allSettled(
-          connections.map((c) => get().connectOne(c.id))
-        );
       } else {
         set({ isInitializing: false });
       }
@@ -146,6 +144,9 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     } finally {
       await _persist(get().connections);
     }
+
+    // Register proxy alias in Worker KV (best-effort, non-blocking)
+    S3Service.registerProxyAlias(id).catch(() => {});
   },
 
   updateConnection: async (id, displayName, config) => {
@@ -168,9 +169,16 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     } finally {
       await _persist(get().connections);
     }
+
+    // Re-register proxy alias in Worker KV (best-effort, non-blocking)
+    S3Service.registerProxyAlias(id).catch(() => {});
   },
 
   removeConnection: async (id) => {
+    // Unregister proxy alias from Worker KV (best-effort)
+    const conn = get().connections.find((c) => c.id === id);
+    if (conn) S3Service.unregisterProxyAlias(conn.config).catch(() => {});
+
     S3Service.destroyClientForConnection(id);
     set((state) => ({
       connections: state.connections.filter((c) => c.id !== id),

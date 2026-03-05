@@ -384,6 +384,167 @@ export async function getPresignedUploadUrl(
   return getSignedUrl(client, command, { expiresIn });
 }
 
+/**
+ * Build the base64url-encoded S3 config query param for the proxy.
+ * This embeds S3 credentials in the URL so Image/Video components can use it directly.
+ */
+function buildProxyS3CfgParam(config: S3Config): string {
+  const cfg = {
+    e: resolveEndpoint(config),
+    r: config.region,
+    a: config.accessKeyId,
+    s: config.secretAccessKey,
+  };
+  // Base64url encode (no padding, URL-safe chars)
+  const b64 = btoa(JSON.stringify(cfg))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return b64;
+}
+
+/**
+ * Build a proxy URL for a given bucket + key.
+ * Used for app-internal requests (Image/Video components, fetch).
+ */
+function buildProxyUrl(config: S3Config, bucket: string, key: string): string {
+  const base = config.proxyUrl!.replace(/\/+$/, '');
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/');
+  const params = new URLSearchParams();
+  if (config.proxyToken) params.set('token', config.proxyToken);
+  params.set('s3cfg', buildProxyS3CfgParam(config));
+  return `${base}/${encodeURIComponent(bucket)}/${encodedKey}?${params.toString()}`;
+}
+
+/**
+ * Build a clean share URL: /{alias}/{bucket}/{key} — no credentials, no token.
+ */
+function buildCleanShareUrl(config: S3Config, bucket: string, key: string): string {
+  const base = config.proxyUrl!.replace(/\/+$/, '');
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/');
+  return `${base}/${encodeURIComponent(config.proxyAlias!)}/${encodeURIComponent(bucket)}/${encodedKey}`;
+}
+
+/**
+ * Get a file URL — uses proxy if configured, otherwise falls back to presigned URL.
+ * For app-internal read-only access (preview, download).
+ */
+export async function getFileUrl(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  expiresIn = 3600
+): Promise<string> {
+  const { config } = getClientEntry(connectionId);
+  if (config.proxyUrl) {
+    return buildProxyUrl(config, bucket, key);
+  }
+  return getPresignedUrl(connectionId, bucket, key, expiresIn);
+}
+
+/**
+ * Get headers for proxy requests (fetch/download that support custom headers).
+ * Returns null if the connection doesn't use a proxy.
+ */
+export function getProxyHeaders(connectionId: string): Record<string, string> | null {
+  const { config } = getClientEntry(connectionId);
+  if (!config.proxyUrl) return null;
+  const headers: Record<string, string> = {
+    'X-S3-Endpoint': resolveEndpoint(config),
+    'X-S3-Region': config.region,
+    'X-S3-Access-Key': config.accessKeyId,
+    'X-S3-Secret-Key': config.secretAccessKey,
+  };
+  if (config.proxyToken) {
+    headers['Authorization'] = `Bearer ${config.proxyToken}`;
+  }
+  return headers;
+}
+
+/**
+ * Batch-generate file URLs (proxy or presigned) in parallel.
+ */
+export async function batchGetFileUrls(
+  connectionId: string,
+  bucket: string,
+  keys: string[],
+  expiresIn = 1800
+): Promise<Record<string, string>> {
+  const { config } = getClientEntry(connectionId);
+  if (config.proxyUrl) {
+    const result: Record<string, string> = {};
+    for (const key of keys) {
+      result[key] = buildProxyUrl(config, bucket, key);
+    }
+    return result;
+  }
+  return batchGetPresignedUrls(connectionId, bucket, keys, expiresIn);
+}
+
+/**
+ * Get a shareable URL — clean proxy URL (no credentials) if alias is configured,
+ * otherwise falls back to presigned URL.
+ */
+export async function getShareUrl(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  expiresIn = 3600
+): Promise<string> {
+  const { config } = getClientEntry(connectionId);
+  if (config.proxyUrl && config.proxyAlias) {
+    return buildCleanShareUrl(config, bucket, key);
+  }
+  return getPresignedUrl(connectionId, bucket, key, expiresIn);
+}
+
+/**
+ * Register this connection's S3 config in the Worker KV for clean share URLs.
+ * Call after saving/updating a connection that has proxyUrl + proxyAlias.
+ */
+export async function registerProxyAlias(connectionId: string): Promise<void> {
+  const { config } = getClientEntry(connectionId);
+  if (!config.proxyUrl || !config.proxyAlias || !config.proxyToken) return;
+  const base = config.proxyUrl.replace(/\/+$/, '');
+  const body = {
+    endpoint: resolveEndpoint(config),
+    region: config.region,
+    accessKey: config.accessKeyId,
+    secretKey: config.secretAccessKey,
+  };
+  const resp = await fetch(
+    `${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${config.proxyToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }
+  );
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Failed to register proxy alias: ${err}`);
+  }
+}
+
+/**
+ * Remove a proxy alias from Worker KV.
+ * Call before deleting a connection that has proxyUrl + proxyAlias.
+ */
+export async function unregisterProxyAlias(config: S3Config): Promise<void> {
+  if (!config.proxyUrl || !config.proxyAlias || !config.proxyToken) return;
+  const base = config.proxyUrl.replace(/\/+$/, '');
+  await fetch(
+    `${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${config.proxyToken}` },
+    }
+  ).catch(() => {}); // best-effort
+}
+
 /** Guess MIME type from file extension */
 export function guessMimeType(fileName: string): string {
   const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
@@ -407,6 +568,10 @@ export function guessMimeType(fileName: string): string {
     mp3: 'audio/mpeg',
     wav: 'audio/wav',
     ogg: 'audio/ogg',
+    aac: 'audio/aac',
+    m4a: 'audio/mp4',
+    flac: 'audio/flac',
+    wma: 'audio/x-ms-wma',
     // Text / Code
     txt: 'text/plain',
     md: 'text/markdown',
@@ -434,11 +599,12 @@ export function guessMimeType(fileName: string): string {
   return mimeMap[ext] || 'application/octet-stream';
 }
 
-/** Check if a file is previewable (image or text-like) */
+/** Check if a file is previewable (image, video, or text/code) */
 export function isPreviewable(fileName: string): boolean {
   const mime = guessMimeType(fileName);
   return (
     mime.startsWith('image/') ||
+    mime.startsWith('video/') ||
     mime.startsWith('text/') ||
     mime === 'application/json' ||
     mime === 'application/xml' ||
@@ -449,6 +615,27 @@ export function isPreviewable(fileName: string): boolean {
 /** Check if a file is an image */
 export function isImageFile(fileName: string): boolean {
   return guessMimeType(fileName).startsWith('image/');
+}
+
+/** Check if a file is an audio file */
+export function isAudioFile(fileName: string): boolean {
+  return guessMimeType(fileName).startsWith('audio/');
+}
+
+/** Check if a file is a video file */
+export function isVideoFile(fileName: string): boolean {
+  return guessMimeType(fileName).startsWith('video/');
+}
+
+/** Check if a file is a code/text file that should be shown with monospace */
+export function isCodeFile(fileName: string): boolean {
+  const mime = guessMimeType(fileName);
+  return (
+    mime.startsWith('text/') ||
+    mime === 'application/json' ||
+    mime === 'application/xml' ||
+    mime === 'application/javascript'
+  );
 }
 
 /** Create an empty object (used to create "folders" in S3) */

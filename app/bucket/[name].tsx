@@ -55,6 +55,7 @@ import * as Sharing from 'expo-sharing';
 import type { S3Object, TransferTask } from '@/lib/types';
 import { Progress } from '@/components/ui/progress';
 import { invalidateBucketCache } from '@/lib/cache';
+import { useSettingsStore } from '@/lib/stores/settings-store';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -104,6 +105,7 @@ export default function ObjectBrowserScreen() {
     setCurrentBucket,
     setCurrentPrefix,
     setObjects,
+    loadCachedObjects,
     setLoading,
     toggleSelection,
     selectAll,
@@ -190,6 +192,7 @@ export default function ObjectBrowserScreen() {
 
   // Thumbnail presigned URLs cache
   const [thumbnailUrls, setThumbnailUrls] = React.useState<Record<string, string>>({});
+  const showThumbnails = useSettingsStore((s) => s.showThumbnails);
 
   const crumbs = React.useMemo(() => breadcrumbs(), [currentPrefix]);
   const selectedCount = selectedKeys.size;
@@ -214,12 +217,19 @@ export default function ObjectBrowserScreen() {
           // Store cache already populated — skip loading indicator, just refresh in background
           setInitialLoaded(true);
         } else {
-          const cached = await S3Service.listObjects(connectionId, bucketName, currentPrefix);
-          if (cached.length > 0) {
-            setObjects(cached);
+          // Try disk cache first
+          const hasDiskCache = await loadCachedObjects(connectionId);
+          if (hasDiskCache) {
             setInitialLoaded(true);
           } else {
-            setLoading(true);
+            // Fall back to TTL cache / network
+            const cached = await S3Service.listObjects(connectionId, bucketName, currentPrefix);
+            if (cached.length > 0) {
+              setObjects(cached);
+              setInitialLoaded(true);
+            } else {
+              setLoading(true);
+            }
           }
         }
         // Always fetch fresh data in background
@@ -246,7 +256,7 @@ export default function ObjectBrowserScreen() {
         }
       }
     },
-    [bucketName, connectionId, currentPrefix, setObjects, setLoading]
+    [bucketName, connectionId, currentPrefix, setObjects, loadCachedObjects, setLoading]
   );
 
   React.useEffect(() => {
@@ -255,7 +265,10 @@ export default function ObjectBrowserScreen() {
 
   // Generate thumbnail URLs for image files — parallel batch with caching
   React.useEffect(() => {
-    if (!connectionId || !bucketName) return;
+    if (!connectionId || !bucketName || !showThumbnails) {
+      setThumbnailUrls({});
+      return;
+    }
     let cancelled = false;
 
     const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico'];
@@ -272,7 +285,7 @@ export default function ObjectBrowserScreen() {
 
     // Use batch parallel generator (with internal caching)
     const keys = imageObjects.slice(0, 50).map((o) => o.key);
-    S3Service.batchGetPresignedUrls(connectionId, bucketName, keys, 1800)
+    S3Service.batchGetFileUrls(connectionId, bucketName, keys, 1800)
       .then((urls) => {
         if (!cancelled) setThumbnailUrls(urls);
       })
@@ -283,7 +296,7 @@ export default function ObjectBrowserScreen() {
     return () => {
       cancelled = true;
     };
-  }, [objects, connectionId, bucketName]);
+  }, [objects, connectionId, bucketName, showThumbnails]);
 
   const handleFolderPress = React.useCallback(
     (folder: S3Object) => {
@@ -364,13 +377,14 @@ export default function ObjectBrowserScreen() {
       setPreviewLoading(true);
 
       try {
-        const url = await S3Service.getPresignedUrl(connectionId, bucketName, obj.key);
+        const url = await S3Service.getFileUrl(connectionId, bucketName, obj.key);
 
-        if (S3Service.isImageFile(obj.name)) {
+        if (S3Service.isImageFile(obj.name) || S3Service.isVideoFile(obj.name)) {
           setPreviewUrl(url);
-        } else if (S3Service.isPreviewable(obj.name)) {
-          // Fetch text content
-          const response = await fetch(url);
+        } else if (S3Service.isCodeFile(obj.name)) {
+          // Fetch text content for code/text files
+          const headers = S3Service.getProxyHeaders(connectionId) || {};
+          const response = await fetch(url, { headers });
           const text = await response.text();
           // Limit to 100KB for display
           setPreviewText(
@@ -410,7 +424,7 @@ export default function ObjectBrowserScreen() {
       addTask(task);
 
       try {
-        const url = await S3Service.getPresignedUrl(connectionId, bucketName, obj.key);
+        const url = await S3Service.getFileUrl(connectionId, bucketName, obj.key);
 
         // Ensure download directory exists
         const downloadDir = FileSystem.documentDirectory + 's3downloads/';
@@ -422,7 +436,9 @@ export default function ObjectBrowserScreen() {
         const destUri = downloadDir + obj.name;
         updateTask(taskId, { progress: 10 });
 
-        const downloadResult = await FileSystem.downloadAsync(url, destUri);
+        const downloadResult = await FileSystem.downloadAsync(url, destUri, {
+          headers: S3Service.getProxyHeaders(connectionId) || undefined,
+        });
 
         updateTask(taskId, {
           progress: 100,
@@ -487,14 +503,14 @@ export default function ObjectBrowserScreen() {
   const handlePreviewCopyLink = React.useCallback(async () => {
     if (!previewObject || !bucketName || !connectionId) return;
     try {
-      const url = await S3Service.getPresignedUrl(connectionId, bucketName, previewObject.key);
+      const url = await S3Service.getShareUrl(connectionId, bucketName, previewObject.key);
       await Share.share({ message: url });
     } catch (error: any) {
       console.error('Copy link error:', error);
     }
   }, [previewObject, bucketName, connectionId]);
 
-  // ── View / share presigned URL ───────────────────────────────────────────
+  // ── View / share URL ─────────────────────────────────────────────────────
   const handleShareUrls = React.useCallback(async () => {
     if (!bucketName || !connectionId) return;
     const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
@@ -503,7 +519,7 @@ export default function ObjectBrowserScreen() {
     try {
       const urls: string[] = [];
       for (const obj of selected) {
-        const url = await S3Service.getPresignedUrl(connectionId, bucketName, obj.key);
+        const url = await S3Service.getShareUrl(connectionId, bucketName, obj.key);
         urls.push(selected.length > 1 ? `${obj.name}\n${url}` : url);
       }
       await Share.share({ message: urls.join('\n\n') });

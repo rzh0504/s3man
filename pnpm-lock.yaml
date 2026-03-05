@@ -146,6 +146,9 @@ importers:
       expo-updates:
         specifier: ~55.0.12
         version: 55.0.12(expo@55.0.4)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)(typescript@5.9.3)
+      expo-video:
+        specifier: ^55.0.10
+        version: 55.0.10(expo@55.0.4)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
       lucide-react-native:
         specifier: ^0.545.0
         version: 0.545.0(react-native-svg@15.15.3(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
@@ -3219,6 +3222,13 @@ packages:
   expo-updates@55.0.12:
     resolution: {integrity: sha512-20YTlmivT7pU8+jYMQHqHQmFTdNHHfIMXXVuFjQA31qCyAOwR32AvDn30IBpgn1Z7XJTX+Sr6cEoMhqz5IJfww==}
     hasBin: true
+    peerDependencies:
+      expo: '*'
+      react: '*'
+      react-native: '*'
+
+  expo-video@55.0.10:
+    resolution: {integrity: sha512-L3UXgvGjrJv4ym3PnIGPPQi4LlVHQSh89eYm2Q7Pn9iUy5ce98sAdqPIKV88bfdLAIWfmPecYUoOzozXBPmenw==}
     peerDependencies:
       expo: '*'
       react: '*'
@@ -8790,6 +8800,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
       - typescript
+
+  expo-video@55.0.10(expo@55.0.4)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0):
+    dependencies:
+      expo: 55.0.4(@babel/core@7.29.0)(@expo/dom-webview@55.0.3)(@expo/metro-runtime@55.0.6)(expo-router@55.0.3)(react-dom@19.2.0(react@19.2.0))(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)(typescript@5.9.3)
+      react: 19.2.0
+      react-native: 0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0)
 
   expo@55.0.4(@babel/core@7.29.0)(@expo/dom-webview@55.0.3)(@expo/metro-runtime@55.0.6)(expo-router@55.0.3)(react-dom@19.2.0(react@19.2.0))(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)(typescript@5.9.3):
     dependencies:
