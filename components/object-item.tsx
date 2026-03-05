@@ -12,25 +12,40 @@ import {
   FileTextIcon,
   FileArchiveIcon,
   FileCodeIcon,
+  FileAudioIcon,
+  FileSpreadsheetIcon,
 } from 'lucide-react-native';
 import React from 'react';
 import { View, Pressable, Image } from 'react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-function getFileIcon(name: string): LucideIcon {
+type FileTypeInfo = { icon: LucideIcon; color: string; bg: string };
+
+function getFileTypeInfo(name: string): FileTypeInfo {
   const ext = getFileExtension(name);
   const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'];
   const videoExts = ['mp4', 'mov', 'avi', 'webm', 'mkv'];
+  const audioExts = ['mp3', 'wav', 'ogg', 'aac', 'm4a', 'flac', 'wma'];
   const archiveExts = ['zip', 'tar', 'gz', 'rar', '7z'];
   const codeExts = ['json', 'xml', 'html', 'css', 'js', 'ts', 'tsx', 'jsx'];
-  const textExts = ['txt', 'md', 'csv', 'log', 'pdf', 'doc', 'docx'];
+  const spreadsheetExts = ['xls', 'xlsx', 'csv'];
+  const textExts = ['txt', 'md', 'log', 'pdf', 'doc', 'docx'];
 
-  if (imageExts.includes(ext)) return ImageIcon;
-  if (videoExts.includes(ext)) return FileVideoIcon;
-  if (archiveExts.includes(ext)) return FileArchiveIcon;
-  if (codeExts.includes(ext)) return FileCodeIcon;
-  if (textExts.includes(ext)) return FileTextIcon;
-  return FileIcon;
+  if (imageExts.includes(ext))
+    return { icon: ImageIcon, color: 'text-emerald-600', bg: 'bg-emerald-500/10' };
+  if (videoExts.includes(ext))
+    return { icon: FileVideoIcon, color: 'text-purple-600', bg: 'bg-purple-500/10' };
+  if (audioExts.includes(ext))
+    return { icon: FileAudioIcon, color: 'text-pink-600', bg: 'bg-pink-500/10' };
+  if (archiveExts.includes(ext))
+    return { icon: FileArchiveIcon, color: 'text-amber-600', bg: 'bg-amber-500/10' };
+  if (codeExts.includes(ext))
+    return { icon: FileCodeIcon, color: 'text-blue-600', bg: 'bg-blue-500/10' };
+  if (spreadsheetExts.includes(ext))
+    return { icon: FileSpreadsheetIcon, color: 'text-green-600', bg: 'bg-green-500/10' };
+  if (textExts.includes(ext))
+    return { icon: FileTextIcon, color: 'text-sky-600', bg: 'bg-sky-500/10' };
+  return { icon: FileIcon, color: 'text-muted-foreground', bg: 'bg-muted' };
 }
 
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico'];
@@ -49,24 +64,46 @@ interface ObjectItemProps {
   onLongPress?: () => void;
 }
 
+const ICON_SIZE = 40;
+
 function ImageThumbnail({ url }: { url: string }) {
   const [loaded, setLoaded] = React.useState(false);
   const [error, setError] = React.useState(false);
 
   if (error) {
-    return <Icon as={ImageIcon} className="text-muted-foreground size-8" />;
+    return (
+      <View
+        className="items-center justify-center overflow-hidden rounded-lg bg-emerald-500/10"
+        style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+        <Icon as={ImageIcon} className="size-5 text-emerald-600" />
+      </View>
+    );
   }
 
   return (
-    <View className="size-8 items-center justify-center overflow-hidden rounded">
-      {!loaded && <Skeleton className="absolute size-8 rounded" />}
+    <View
+      className="items-center justify-center overflow-hidden rounded-xl"
+      style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+      {!loaded && (
+        <Skeleton className="absolute rounded-xl" style={{ width: ICON_SIZE, height: ICON_SIZE }} />
+      )}
       <Image
         source={{ uri: url }}
-        className="size-8 rounded"
+        style={{ width: ICON_SIZE, height: ICON_SIZE, borderRadius: 12 }}
         resizeMode="cover"
         onLoad={() => setLoaded(true)}
         onError={() => setError(true)}
       />
+    </View>
+  );
+}
+
+function FileTypeIcon({ info }: { info: FileTypeInfo }) {
+  return (
+    <View
+      className={`items-center justify-center rounded-xl ${info.bg}`}
+      style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+      <Icon as={info.icon} className={`${info.color} size-5`} />
     </View>
   );
 }
@@ -89,14 +126,18 @@ export const ObjectItem = React.memo(function ObjectItem({
         onLongPress={onLongPress}
         className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
         {selectionMode && <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />}
-        <Icon as={FolderIcon} className="text-muted-foreground size-5" />
+        <View
+          className="items-center justify-center rounded-xl bg-blue-500/10"
+          style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+          <Icon as={FolderIcon} className="size-5 text-blue-600" />
+        </View>
         <Text className="text-foreground flex-1">{folderName}</Text>
         <Text className="text-muted-foreground w-20 text-right text-xs">-</Text>
       </Pressable>
     );
   }
 
-  const FileIconComponent = getFileIcon(object.name);
+  const fileTypeInfo = getFileTypeInfo(object.name);
   const showThumbnail = isImageExt(object.name) && thumbnailUrl;
 
   return (
@@ -105,11 +146,7 @@ export const ObjectItem = React.memo(function ObjectItem({
       onLongPress={onLongPress}
       className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
       {selectionMode && <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />}
-      {showThumbnail ? (
-        <ImageThumbnail url={thumbnailUrl} />
-      ) : (
-        <Icon as={FileIconComponent} className="text-muted-foreground size-5" />
-      )}
+      {showThumbnail ? <ImageThumbnail url={thumbnailUrl} /> : <FileTypeIcon info={fileTypeInfo} />}
       <Text className="text-foreground flex-1" numberOfLines={1}>
         {object.name}
       </Text>

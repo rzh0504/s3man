@@ -407,6 +407,10 @@ export function guessMimeType(fileName: string): string {
     mp3: 'audio/mpeg',
     wav: 'audio/wav',
     ogg: 'audio/ogg',
+    aac: 'audio/aac',
+    m4a: 'audio/mp4',
+    flac: 'audio/flac',
+    wma: 'audio/x-ms-wma',
     // Text / Code
     txt: 'text/plain',
     md: 'text/markdown',
@@ -434,11 +438,12 @@ export function guessMimeType(fileName: string): string {
   return mimeMap[ext] || 'application/octet-stream';
 }
 
-/** Check if a file is previewable (image or text-like) */
+/** Check if a file is previewable (image, video, or text/code) */
 export function isPreviewable(fileName: string): boolean {
   const mime = guessMimeType(fileName);
   return (
     mime.startsWith('image/') ||
+    mime.startsWith('video/') ||
     mime.startsWith('text/') ||
     mime === 'application/json' ||
     mime === 'application/xml' ||
@@ -449,6 +454,27 @@ export function isPreviewable(fileName: string): boolean {
 /** Check if a file is an image */
 export function isImageFile(fileName: string): boolean {
   return guessMimeType(fileName).startsWith('image/');
+}
+
+/** Check if a file is an audio file */
+export function isAudioFile(fileName: string): boolean {
+  return guessMimeType(fileName).startsWith('audio/');
+}
+
+/** Check if a file is a video file */
+export function isVideoFile(fileName: string): boolean {
+  return guessMimeType(fileName).startsWith('video/');
+}
+
+/** Check if a file is a code/text file that should be shown with monospace */
+export function isCodeFile(fileName: string): boolean {
+  const mime = guessMimeType(fileName);
+  return (
+    mime.startsWith('text/') ||
+    mime === 'application/json' ||
+    mime === 'application/xml' ||
+    mime === 'application/javascript'
+  );
 }
 
 /** Create an empty object (used to create "folders" in S3) */

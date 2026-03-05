@@ -10,6 +10,8 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useUniwind } from 'uniwind';
 import { useConnectionStore } from '@/lib/stores/connection-store';
+import { useBucketStore } from '@/lib/stores/bucket-store';
+import { useSettingsStore } from '@/lib/stores/settings-store';
 import { useEffect } from 'react';
 
 export {
@@ -20,16 +22,27 @@ export {
 export default function RootLayout() {
   const { theme } = useUniwind();
   const loadConnections = useConnectionStore((s) => s.loadConnections);
+  const loadCachedBuckets = useBucketStore((s) => s.loadCachedBuckets);
+  const loadSettings = useSettingsStore((s) => s.loadSettings);
 
   useEffect(() => {
+    loadSettings();
+    loadCachedBuckets();
     loadConnections();
-  }, [loadConnections]);
+  }, [loadConnections, loadCachedBuckets, loadSettings]);
 
   return (
     <ThemeProvider value={NAV_THEME[(theme ?? 'light') as keyof typeof NAV_THEME]}>
       <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false, animation: 'none' }} />
+        <Stack.Screen
+          name="connections"
+          options={{
+            headerShown: false,
+            animation: 'slide_from_right',
+          }}
+        />
         <Stack.Screen
           name="bucket/[name]"
           options={{

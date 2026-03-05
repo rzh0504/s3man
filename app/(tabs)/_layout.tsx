@@ -19,7 +19,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { key: 'index', label: 'Buckets', icon: DatabaseIcon },
   { key: 'transfers', label: 'Transfers', icon: ArrowLeftRightIcon },
-  { key: 'config', label: 'Config', icon: SettingsIcon },
+  { key: 'config', label: 'Settings', icon: SettingsIcon },
 ];
 
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
@@ -80,7 +80,7 @@ export default function TabLayout() {
     <Tabs tabBar={(props) => <CustomTabBar {...props} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="index" options={{ title: 'Buckets' }} />
       <Tabs.Screen name="transfers" options={{ title: 'Transfers' }} />
-      <Tabs.Screen name="config" options={{ title: 'Config' }} />
+      <Tabs.Screen name="config" options={{ title: 'Settings' }} />
     </Tabs>
   );
 }

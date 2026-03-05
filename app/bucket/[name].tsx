@@ -55,6 +55,7 @@ import * as Sharing from 'expo-sharing';
 import type { S3Object, TransferTask } from '@/lib/types';
 import { Progress } from '@/components/ui/progress';
 import { invalidateBucketCache } from '@/lib/cache';
+import { useSettingsStore } from '@/lib/stores/settings-store';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -104,6 +105,7 @@ export default function ObjectBrowserScreen() {
     setCurrentBucket,
     setCurrentPrefix,
     setObjects,
+    loadCachedObjects,
     setLoading,
     toggleSelection,
     selectAll,
@@ -190,6 +192,7 @@ export default function ObjectBrowserScreen() {
 
   // Thumbnail presigned URLs cache
   const [thumbnailUrls, setThumbnailUrls] = React.useState<Record<string, string>>({});
+  const showThumbnails = useSettingsStore((s) => s.showThumbnails);
 
   const crumbs = React.useMemo(() => breadcrumbs(), [currentPrefix]);
   const selectedCount = selectedKeys.size;
@@ -214,12 +217,19 @@ export default function ObjectBrowserScreen() {
           // Store cache already populated — skip loading indicator, just refresh in background
           setInitialLoaded(true);
         } else {
-          const cached = await S3Service.listObjects(connectionId, bucketName, currentPrefix);
-          if (cached.length > 0) {
-            setObjects(cached);
+          // Try disk cache first
+          const hasDiskCache = await loadCachedObjects(connectionId);
+          if (hasDiskCache) {
             setInitialLoaded(true);
           } else {
-            setLoading(true);
+            // Fall back to TTL cache / network
+            const cached = await S3Service.listObjects(connectionId, bucketName, currentPrefix);
+            if (cached.length > 0) {
+              setObjects(cached);
+              setInitialLoaded(true);
+            } else {
+              setLoading(true);
+            }
           }
         }
         // Always fetch fresh data in background
@@ -246,7 +256,7 @@ export default function ObjectBrowserScreen() {
         }
       }
     },
-    [bucketName, connectionId, currentPrefix, setObjects, setLoading]
+    [bucketName, connectionId, currentPrefix, setObjects, loadCachedObjects, setLoading]
   );
 
   React.useEffect(() => {
@@ -255,7 +265,10 @@ export default function ObjectBrowserScreen() {
 
   // Generate thumbnail URLs for image files — parallel batch with caching
   React.useEffect(() => {
-    if (!connectionId || !bucketName) return;
+    if (!connectionId || !bucketName || !showThumbnails) {
+      setThumbnailUrls({});
+      return;
+    }
     let cancelled = false;
 
     const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico'];
@@ -283,7 +296,7 @@ export default function ObjectBrowserScreen() {
     return () => {
       cancelled = true;
     };
-  }, [objects, connectionId, bucketName]);
+  }, [objects, connectionId, bucketName, showThumbnails]);
 
   const handleFolderPress = React.useCallback(
     (folder: S3Object) => {
@@ -366,10 +379,10 @@ export default function ObjectBrowserScreen() {
       try {
         const url = await S3Service.getPresignedUrl(connectionId, bucketName, obj.key);
 
-        if (S3Service.isImageFile(obj.name)) {
+        if (S3Service.isImageFile(obj.name) || S3Service.isVideoFile(obj.name)) {
           setPreviewUrl(url);
-        } else if (S3Service.isPreviewable(obj.name)) {
-          // Fetch text content
+        } else if (S3Service.isCodeFile(obj.name)) {
+          // Fetch text content for code/text files
           const response = await fetch(url);
           const text = await response.text();
           // Limit to 100KB for display

@@ -108,15 +108,13 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         const saved: SavedConnection[] = JSON.parse(json);
         const connections: S3Connection[] = saved.map((s) => ({
           ...s,
-          status: 'disconnected' as ConnectionStatus,
+          status: 'connected' as ConnectionStatus,
         }));
-        // Show connections immediately (with connecting shimmer)
+        // Create S3 clients without network test (verified on first bucket fetch)
+        for (const c of connections) {
+          S3Service.createClientForConnection(c.id, c.config);
+        }
         set({ connections, isInitializing: false });
-
-        // Auto-connect all in parallel
-        await Promise.allSettled(
-          connections.map((c) => get().connectOne(c.id))
-        );
       } else {
         set({ isInitializing: false });
       }

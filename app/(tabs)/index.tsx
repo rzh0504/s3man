@@ -161,7 +161,8 @@ export default function BucketIndexScreen() {
   const insets = useSafeAreaInsets();
   const connections = useConnectionStore((s) => s.connections);
   const isInitializing = useConnectionStore((s) => s.isInitializing);
-  const { buckets, isLoading, setBucketsForConnection, setLoading } = useBucketStore();
+  const { buckets, isLoading, hasCachedData, setBucketsForConnection, setLoading } =
+    useBucketStore();
 
   const [showCreateDialog, setShowCreateDialog] = React.useState(false);
   const [newBucketName, setNewBucketName] = React.useState('');
@@ -187,10 +188,13 @@ export default function BucketIndexScreen() {
   );
 
   const hasAnyConnection = connections.length > 0;
+  const canShowCached = hasCachedData && !isInitializing;
 
-  // Build sections: one per connected provider
+  // Build sections: one per connected provider (or all connections when showing cached data)
   const sections: ProviderSection[] = React.useMemo(() => {
-    return connectedList.map((conn) => {
+    // Before initial network fetch, use all connections to display cached data
+    const displayList = connectedList.length > 0 ? connectedList : canShowCached ? connections : [];
+    return displayList.map((conn) => {
       const visible = conn.config.visibleBuckets;
       const connBuckets = buckets.filter((b) => b.connectionId === conn.id);
       return {
@@ -201,7 +205,7 @@ export default function BucketIndexScreen() {
             : connBuckets,
       };
     });
-  }, [connectedList, buckets]);
+  }, [connectedList, connections, buckets, canShowCached]);
 
   const totalBuckets = sections.reduce((sum, s) => sum + s.buckets.length, 0);
 
@@ -359,7 +363,7 @@ export default function BucketIndexScreen() {
       </View>
     );
   }
-  if (!hasAnyConnection) {
+  if (!hasAnyConnection && !canShowCached) {
     return (
       <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
@@ -379,7 +383,7 @@ export default function BucketIndexScreen() {
   // ── No connected providers ─────────────────────────────────────────────
 
   // If some connections are still connecting, show skeleton instead of 'Not Connected'
-  if (connectedList.length === 0 && activeOrConnectingList.length > 0) {
+  if (connectedList.length === 0 && activeOrConnectingList.length > 0 && !canShowCached) {
     return (
       <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
@@ -392,7 +396,7 @@ export default function BucketIndexScreen() {
     );
   }
 
-  if (connectedList.length === 0) {
+  if (connectedList.length === 0 && !canShowCached) {
     return (
       <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
@@ -434,7 +438,7 @@ export default function BucketIndexScreen() {
           <RefreshControl refreshing={initialLoaded && isLoading} onRefresh={loadAllBuckets} />
         }
         contentContainerClassName="pt-3 pb-24">
-        {!initialLoaded ? (
+        {!initialLoaded && !canShowCached ? (
           <BucketListSkeleton />
         ) : sections.length === 0 ? (
           <EmptyState
