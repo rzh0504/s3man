@@ -2,6 +2,7 @@ import {
   S3Client,
   ListBucketsCommand,
   ListObjectsV2Command,
+  ListObjectVersionsCommand,
   CreateBucketCommand,
   DeleteBucketCommand,
   DeleteObjectsCommand,
@@ -179,7 +180,13 @@ export async function createBucket(connectionId: string, name: string, region?: 
 }
 
 export async function deleteBucket(connectionId: string, name: string): Promise<void> {
-  const { client } = getClientEntry(connectionId);
+  const { client, config } = getClientEntry(connectionId);
+
+  // B2: purge all hidden versions/delete markers before deleting the bucket
+  if (config.provider === 'backblaze-b2') {
+    await _deleteAllVersionsWithPrefix(client, name, '');
+  }
+
   await client.send(new DeleteBucketCommand({ Bucket: name }));
 }
 
@@ -256,16 +263,22 @@ export async function deleteObjects(
   bucket: string,
   keys: string[]
 ): Promise<void> {
-  const { client } = getClientEntry(connectionId);
+  const { client, config } = getClientEntry(connectionId);
 
-  await client.send(
-    new DeleteObjectsCommand({
-      Bucket: bucket,
-      Delete: {
-        Objects: keys.map((Key) => ({ Key })),
-      },
-    })
-  );
+  if (config.provider === 'backblaze-b2') {
+    // B2 creates hidden "delete marker" versions instead of truly deleting.
+    // We must list all versions for each key and delete them by VersionId.
+    await _deleteAllVersions(client, bucket, keys);
+  } else {
+    await client.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: {
+          Objects: keys.map((Key) => ({ Key })),
+        },
+      })
+    );
+  }
 
   // Invalidate object list cache for this bucket after deletion
   invalidateBucketCache(connectionId, bucket);
@@ -638,6 +651,124 @@ export function isCodeFile(fileName: string): boolean {
   );
 }
 
+// ── B2 version-aware deletion helpers ──────────────────────────────────────
+
+/**
+ * Delete ALL versions (including hidden delete markers) for the given keys.
+ * Required for Backblaze B2 which creates hide markers instead of truly deleting.
+ */
+async function _deleteAllVersions(
+  client: S3Client,
+  bucket: string,
+  keys: string[]
+): Promise<void> {
+  const toDelete: { Key: string; VersionId: string }[] = [];
+
+  // Collect all versions for each key
+  for (const key of keys) {
+    let keyMarker: string | undefined;
+    let versionIdMarker: string | undefined;
+
+    do {
+      const response = await client.send(
+        new ListObjectVersionsCommand({
+          Bucket: bucket,
+          Prefix: key,
+          KeyMarker: keyMarker,
+          VersionIdMarker: versionIdMarker,
+        })
+      );
+
+      for (const v of response.Versions ?? []) {
+        if (v.Key === key && v.VersionId) {
+          toDelete.push({ Key: v.Key, VersionId: v.VersionId });
+        }
+      }
+      for (const dm of response.DeleteMarkers ?? []) {
+        if (dm.Key === key && dm.VersionId) {
+          toDelete.push({ Key: dm.Key, VersionId: dm.VersionId });
+        }
+      }
+
+      if (response.IsTruncated) {
+        keyMarker = response.NextKeyMarker;
+        versionIdMarker = response.NextVersionIdMarker;
+      } else {
+        break;
+      }
+    } while (true);
+  }
+
+  // Delete in batches of 1000
+  for (let i = 0; i < toDelete.length; i += 1000) {
+    const batch = toDelete.slice(i, i + 1000);
+    await client.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: {
+          Objects: batch,
+        },
+      })
+    );
+  }
+}
+
+/**
+ * Delete ALL versions (including delete markers) for all objects under a prefix.
+ * Used by deleteFolderRecursive for B2.
+ */
+async function _deleteAllVersionsWithPrefix(
+  client: S3Client,
+  bucket: string,
+  prefix: string
+): Promise<void> {
+  const toDelete: { Key: string; VersionId: string }[] = [];
+  let keyMarker: string | undefined;
+  let versionIdMarker: string | undefined;
+
+  do {
+    const response = await client.send(
+      new ListObjectVersionsCommand({
+        Bucket: bucket,
+        Prefix: prefix,
+        KeyMarker: keyMarker,
+        VersionIdMarker: versionIdMarker,
+      })
+    );
+
+    for (const v of response.Versions ?? []) {
+      if (v.Key && v.VersionId) {
+        toDelete.push({ Key: v.Key, VersionId: v.VersionId });
+      }
+    }
+    for (const dm of response.DeleteMarkers ?? []) {
+      if (dm.Key && dm.VersionId) {
+        toDelete.push({ Key: dm.Key, VersionId: dm.VersionId });
+      }
+    }
+
+    if (response.IsTruncated) {
+      keyMarker = response.NextKeyMarker;
+      versionIdMarker = response.NextVersionIdMarker;
+    } else {
+      break;
+    }
+  } while (true);
+
+  // Delete in batches of 1000
+  for (let i = 0; i < toDelete.length; i += 1000) {
+    const batch = toDelete.slice(i, i + 1000);
+    await client.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: {
+          Objects: batch,
+        },
+      })
+    );
+  }
+}
+
 /** Create an empty object (used to create "folders" in S3) */
 export async function putEmptyObject(
   connectionId: string,
@@ -665,7 +796,14 @@ export async function deleteFolderRecursive(
   bucket: string,
   prefix: string
 ): Promise<void> {
-  const { client } = getClientEntry(connectionId);
+  const { client, config } = getClientEntry(connectionId);
+
+  if (config.provider === 'backblaze-b2') {
+    // B2: must delete all versions (including hidden delete markers) under this prefix
+    await _deleteAllVersionsWithPrefix(client, bucket, prefix);
+    invalidateBucketCache(connectionId, bucket);
+    return;
+  }
 
   // List ALL objects under this prefix (no delimiter — get everything recursively)
   let continuationToken: string | undefined;
