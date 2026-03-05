@@ -386,6 +386,8 @@ export default function ConnectionsScreen() {
       secretAccessKey: formConfig.secretAccessKey.trim(),
       accountId: formConfig.accountId?.trim(),
       endpointUrl: formConfig.endpointUrl.trim(),
+      proxyUrl: formConfig.proxyUrl?.trim() || undefined,
+      proxyToken: formConfig.proxyToken?.trim() || undefined,
     };
 
     // Include visible buckets selection if user has discovered buckets
@@ -783,6 +785,39 @@ export default function ConnectionsScreen() {
               </View>
             )}
           </View>
+
+          {/* Proxy URL (optional) */}
+          <View className="mb-4 gap-2">
+            <Label>
+              Proxy URL <Text className="text-muted-foreground text-xs">(optional)</Text>
+            </Label>
+            <Input
+              placeholder="https://files.yourdomain.com"
+              value={formConfig.proxyUrl ?? ''}
+              onChangeText={(text) => setFormConfig((p) => ({ ...p, proxyUrl: text }))}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Text className="text-muted-foreground text-xs">
+              Cloudflare Worker proxy for faster access and clean URLs. Leave empty to use presigned
+              S3 URLs.
+            </Text>
+          </View>
+
+          {/* Proxy Token (shown when proxy URL is set) */}
+          {!!formConfig.proxyUrl && (
+            <View className="mb-6 gap-2">
+              <Label>Proxy Token</Label>
+              <Input
+                placeholder="Bearer token for proxy auth"
+                value={formConfig.proxyToken ?? ''}
+                onChangeText={(text) => setFormConfig((p) => ({ ...p, proxyToken: text }))}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          )}
 
           {/* Bucket Discovery */}
           <View className="mb-6 gap-3">

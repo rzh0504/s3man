@@ -12,6 +12,10 @@ export interface S3Config {
   accountId?: string;
   /** If set, only these buckets are shown on the index. Empty = show all. */
   visibleBuckets?: string[];
+  /** Cloudflare Worker proxy URL, e.g. https://files.yourdomain.com */
+  proxyUrl?: string;
+  /** Bearer token for authenticating with the Worker proxy */
+  proxyToken?: string;
 }
 
 // 连接状态

@@ -384,6 +384,59 @@ export async function getPresignedUploadUrl(
   return getSignedUrl(client, command, { expiresIn });
 }
 
+/**
+ * Get a file URL — uses proxy if configured, otherwise falls back to presigned URL.
+ * For read-only access (preview, download, share).
+ */
+export async function getFileUrl(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  expiresIn = 3600
+): Promise<string> {
+  const { config } = getClientEntry(connectionId);
+  if (config.proxyUrl) {
+    const base = config.proxyUrl.replace(/\/+$/, '');
+    const encodedKey = key.split('/').map(encodeURIComponent).join('/');
+    const tokenQuery = config.proxyToken ? `?token=${encodeURIComponent(config.proxyToken)}` : '';
+    return `${base}/${encodeURIComponent(bucket)}/${encodedKey}${tokenQuery}`;
+  }
+  return getPresignedUrl(connectionId, bucket, key, expiresIn);
+}
+
+/**
+ * Get the Authorization header for proxy requests.
+ * Returns null if the connection doesn't use a proxy.
+ */
+export function getProxyAuthHeader(connectionId: string): Record<string, string> | null {
+  const { config } = getClientEntry(connectionId);
+  if (!config.proxyUrl || !config.proxyToken) return null;
+  return { Authorization: `Bearer ${config.proxyToken}` };
+}
+
+/**
+ * Batch-generate file URLs (proxy or presigned) in parallel.
+ */
+export async function batchGetFileUrls(
+  connectionId: string,
+  bucket: string,
+  keys: string[],
+  expiresIn = 1800
+): Promise<Record<string, string>> {
+  const { config } = getClientEntry(connectionId);
+  if (config.proxyUrl) {
+    const base = config.proxyUrl.replace(/\/+$/, '');
+    const tokenQuery = config.proxyToken ? `?token=${encodeURIComponent(config.proxyToken)}` : '';
+    const result: Record<string, string> = {};
+    for (const key of keys) {
+      const encodedKey = key.split('/').map(encodeURIComponent).join('/');
+      result[key] = `${base}/${encodeURIComponent(bucket)}/${encodedKey}${tokenQuery}`;
+    }
+    return result;
+  }
+  return batchGetPresignedUrls(connectionId, bucket, keys, expiresIn);
+}
+
 /** Guess MIME type from file extension */
 export function guessMimeType(fileName: string): string {
   const ext = fileName.split('.').pop()?.toLowerCase() ?? '';

@@ -285,7 +285,7 @@ export default function ObjectBrowserScreen() {
 
     // Use batch parallel generator (with internal caching)
     const keys = imageObjects.slice(0, 50).map((o) => o.key);
-    S3Service.batchGetPresignedUrls(connectionId, bucketName, keys, 1800)
+    S3Service.batchGetFileUrls(connectionId, bucketName, keys, 1800)
       .then((urls) => {
         if (!cancelled) setThumbnailUrls(urls);
       })
@@ -377,13 +377,14 @@ export default function ObjectBrowserScreen() {
       setPreviewLoading(true);
 
       try {
-        const url = await S3Service.getPresignedUrl(connectionId, bucketName, obj.key);
+        const url = await S3Service.getFileUrl(connectionId, bucketName, obj.key);
 
         if (S3Service.isImageFile(obj.name) || S3Service.isVideoFile(obj.name)) {
           setPreviewUrl(url);
         } else if (S3Service.isCodeFile(obj.name)) {
           // Fetch text content for code/text files
-          const response = await fetch(url);
+          const headers = S3Service.getProxyAuthHeader(connectionId) || {};
+          const response = await fetch(url, { headers });
           const text = await response.text();
           // Limit to 100KB for display
           setPreviewText(
@@ -423,7 +424,7 @@ export default function ObjectBrowserScreen() {
       addTask(task);
 
       try {
-        const url = await S3Service.getPresignedUrl(connectionId, bucketName, obj.key);
+        const url = await S3Service.getFileUrl(connectionId, bucketName, obj.key);
 
         // Ensure download directory exists
         const downloadDir = FileSystem.documentDirectory + 's3downloads/';
@@ -435,7 +436,9 @@ export default function ObjectBrowserScreen() {
         const destUri = downloadDir + obj.name;
         updateTask(taskId, { progress: 10 });
 
-        const downloadResult = await FileSystem.downloadAsync(url, destUri);
+        const downloadResult = await FileSystem.downloadAsync(url, destUri, {
+          headers: S3Service.getProxyAuthHeader(connectionId) || undefined,
+        });
 
         updateTask(taskId, {
           progress: 100,
@@ -500,7 +503,7 @@ export default function ObjectBrowserScreen() {
   const handlePreviewCopyLink = React.useCallback(async () => {
     if (!previewObject || !bucketName || !connectionId) return;
     try {
-      const url = await S3Service.getPresignedUrl(connectionId, bucketName, previewObject.key);
+      const url = await S3Service.getFileUrl(connectionId, bucketName, previewObject.key);
       await Share.share({ message: url });
     } catch (error: any) {
       console.error('Copy link error:', error);
@@ -516,7 +519,7 @@ export default function ObjectBrowserScreen() {
     try {
       const urls: string[] = [];
       for (const obj of selected) {
-        const url = await S3Service.getPresignedUrl(connectionId, bucketName, obj.key);
+        const url = await S3Service.getFileUrl(connectionId, bucketName, obj.key);
         urls.push(selected.length > 1 ? `${obj.name}\n${url}` : url);
       }
       await Share.share({ message: urls.join('\n\n') });
