@@ -3,6 +3,7 @@ import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,6 +32,7 @@ import * as S3Service from '@/lib/s3-service';
 import { getProvider } from '@/lib/constants';
 import type { BucketInfo, S3Connection } from '@/lib/types';
 import { ProviderIcon } from '@/components/provider-icons';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   FolderIcon,
   PlusIcon,
@@ -208,6 +210,37 @@ export default function BucketIndexScreen() {
   }, [connectedList, connections, buckets, canShowCached]);
 
   const totalBuckets = sections.reduce((sum, s) => sum + s.buckets.length, 0);
+
+  // ── Provider tabs ──────────────────────────────────────────────────────
+
+  const [activeProvider, setActiveProvider] = React.useState<string>('all');
+
+  // Unique provider types from connected/displayed connections
+  const providerTabs = React.useMemo(() => {
+    const seen = new Map<S3Provider, string>();
+    for (const s of sections) {
+      const p = s.connection.config.provider;
+      if (!seen.has(p)) {
+        seen.set(p, getProvider(p).label);
+      }
+    }
+    return Array.from(seen, ([key, label]) => ({ key, label }));
+  }, [sections]);
+
+  // Reset to "all" when the active provider no longer has connections
+  React.useEffect(() => {
+    if (activeProvider !== 'all' && !providerTabs.some((t) => t.key === activeProvider)) {
+      setActiveProvider('all');
+    }
+  }, [providerTabs, activeProvider]);
+
+  const filteredSections = React.useMemo(
+    () =>
+      activeProvider === 'all'
+        ? sections
+        : sections.filter((s) => s.connection.config.provider === activeProvider),
+    [sections, activeProvider]
+  );
 
   // ── Collapse / Expand ──────────────────────────────────────────────────
 
@@ -432,34 +465,58 @@ export default function BucketIndexScreen() {
 
       <Separator />
 
-      {/* Grouped Bucket Sections */}
-      <ScrollView
-        refreshControl={
-          <RefreshControl refreshing={initialLoaded && isLoading} onRefresh={loadAllBuckets} />
-        }
-        contentContainerClassName="pt-3 pb-24">
-        {!initialLoaded && !canShowCached ? (
-          <BucketListSkeleton />
-        ) : sections.length === 0 ? (
-          <EmptyState
-            icon={FolderIcon}
-            title="No Buckets"
-            description="Create a new bucket to get started."
-          />
-        ) : (
-          sections.map((section) => (
-            <ProviderSectionCard
-              key={section.connection.id}
-              section={section}
-              collapsed={collapsedIds === 'all' || collapsedIds.has(section.connection.id)}
-              onToggle={() => toggleCollapse(section.connection.id)}
-              onBucketPress={handleBucketPress}
-              onCreateBucket={openCreateDialog}
-              onDeleteBucket={handleDeleteBucket}
-            />
-          ))
+      {/* Provider Tabs + Grouped Bucket Sections */}
+      <Tabs value={activeProvider} onValueChange={setActiveProvider} className="flex-1">
+        {providerTabs.length > 1 && (
+          <View className="px-4 pt-3">
+            <TabsList className="h-10">
+              <TabsTrigger value="all" className="px-3.5 py-1.5">
+                <Icon
+                  as={DatabaseIcon}
+                  className={cn('size-5', activeProvider !== 'all' && 'opacity-40')}
+                />
+              </TabsTrigger>
+              {providerTabs.map((tab) => (
+                <TabsTrigger key={tab.key} value={tab.key} className="px-3.5 py-1.5">
+                  <ProviderIcon
+                    provider={tab.key as S3Provider}
+                    size={20}
+                    color={activeProvider !== tab.key ? 'hsl(0, 0%, 60%)' : undefined}
+                  />
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </View>
         )}
-      </ScrollView>
+
+        <ScrollView
+          refreshControl={
+            <RefreshControl refreshing={initialLoaded && isLoading} onRefresh={loadAllBuckets} />
+          }
+          contentContainerClassName="pt-3 pb-24">
+          {!initialLoaded && !canShowCached ? (
+            <BucketListSkeleton />
+          ) : filteredSections.length === 0 ? (
+            <EmptyState
+              icon={FolderIcon}
+              title="No Buckets"
+              description="Create a new bucket to get started."
+            />
+          ) : (
+            filteredSections.map((section) => (
+              <ProviderSectionCard
+                key={section.connection.id}
+                section={section}
+                collapsed={collapsedIds === 'all' || collapsedIds.has(section.connection.id)}
+                onToggle={() => toggleCollapse(section.connection.id)}
+                onBucketPress={handleBucketPress}
+                onCreateBucket={openCreateDialog}
+                onDeleteBucket={handleDeleteBucket}
+              />
+            ))
+          )}
+        </ScrollView>
+      </Tabs>
 
       {/* Create Bucket Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
