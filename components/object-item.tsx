@@ -19,7 +19,7 @@ import React from 'react';
 import { View, Pressable, Image } from 'react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-type FileTypeInfo = { icon: LucideIcon; color: string; bg: string };
+type FileTypeInfo = { icon: LucideIcon; color: string };
 
 function getFileTypeInfo(name: string): FileTypeInfo {
   const ext = getFileExtension(name);
@@ -31,21 +31,14 @@ function getFileTypeInfo(name: string): FileTypeInfo {
   const spreadsheetExts = ['xls', 'xlsx', 'csv'];
   const textExts = ['txt', 'md', 'log', 'pdf', 'doc', 'docx'];
 
-  if (imageExts.includes(ext))
-    return { icon: ImageIcon, color: 'text-emerald-600', bg: 'bg-emerald-500/10' };
-  if (videoExts.includes(ext))
-    return { icon: FileVideoIcon, color: 'text-purple-600', bg: 'bg-purple-500/10' };
-  if (audioExts.includes(ext))
-    return { icon: FileAudioIcon, color: 'text-pink-600', bg: 'bg-pink-500/10' };
-  if (archiveExts.includes(ext))
-    return { icon: FileArchiveIcon, color: 'text-amber-600', bg: 'bg-amber-500/10' };
-  if (codeExts.includes(ext))
-    return { icon: FileCodeIcon, color: 'text-blue-600', bg: 'bg-blue-500/10' };
-  if (spreadsheetExts.includes(ext))
-    return { icon: FileSpreadsheetIcon, color: 'text-green-600', bg: 'bg-green-500/10' };
-  if (textExts.includes(ext))
-    return { icon: FileTextIcon, color: 'text-sky-600', bg: 'bg-sky-500/10' };
-  return { icon: FileIcon, color: 'text-muted-foreground', bg: 'bg-muted' };
+  if (imageExts.includes(ext)) return { icon: ImageIcon, color: 'text-emerald-600' };
+  if (videoExts.includes(ext)) return { icon: FileVideoIcon, color: 'text-purple-600' };
+  if (audioExts.includes(ext)) return { icon: FileAudioIcon, color: 'text-pink-600' };
+  if (archiveExts.includes(ext)) return { icon: FileArchiveIcon, color: 'text-amber-600' };
+  if (codeExts.includes(ext)) return { icon: FileCodeIcon, color: 'text-blue-600' };
+  if (spreadsheetExts.includes(ext)) return { icon: FileSpreadsheetIcon, color: 'text-green-600' };
+  if (textExts.includes(ext)) return { icon: FileTextIcon, color: 'text-sky-600' };
+  return { icon: FileIcon, color: 'text-muted-foreground' };
 }
 
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico'];
@@ -64,7 +57,8 @@ interface ObjectItemProps {
   onLongPress?: () => void;
 }
 
-const ICON_SIZE = 40;
+const ICON_SIZE = 24;
+const THUMB_RADIUS = 6;
 
 function ImageThumbnail({ url }: { url: string }) {
   const [loaded, setLoaded] = React.useState(false);
@@ -72,9 +66,7 @@ function ImageThumbnail({ url }: { url: string }) {
 
   if (error) {
     return (
-      <View
-        className="items-center justify-center overflow-hidden rounded-lg bg-emerald-500/10"
-        style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+      <View className="items-center justify-center" style={{ width: ICON_SIZE, height: ICON_SIZE }}>
         <Icon as={ImageIcon} className="size-5 text-emerald-600" />
       </View>
     );
@@ -82,14 +74,17 @@ function ImageThumbnail({ url }: { url: string }) {
 
   return (
     <View
-      className="items-center justify-center overflow-hidden rounded-xl"
-      style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+      className="items-center justify-center overflow-hidden"
+      style={{ width: ICON_SIZE, height: ICON_SIZE, borderRadius: THUMB_RADIUS }}>
       {!loaded && (
-        <Skeleton className="absolute rounded-xl" style={{ width: ICON_SIZE, height: ICON_SIZE }} />
+        <Skeleton
+          className="absolute"
+          style={{ width: ICON_SIZE, height: ICON_SIZE, borderRadius: THUMB_RADIUS }}
+        />
       )}
       <Image
         source={{ uri: url }}
-        style={{ width: ICON_SIZE, height: ICON_SIZE, borderRadius: 12 }}
+        style={{ width: ICON_SIZE, height: ICON_SIZE, borderRadius: THUMB_RADIUS }}
         resizeMode="cover"
         onLoad={() => setLoaded(true)}
         onError={() => setError(true)}
@@ -100,9 +95,7 @@ function ImageThumbnail({ url }: { url: string }) {
 
 function FileTypeIcon({ info }: { info: FileTypeInfo }) {
   return (
-    <View
-      className={`items-center justify-center rounded-xl ${info.bg}`}
-      style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+    <View className="items-center justify-center" style={{ width: ICON_SIZE, height: ICON_SIZE }}>
       <Icon as={info.icon} className={`${info.color} size-5`} />
     </View>
   );
@@ -127,7 +120,7 @@ export const ObjectItem = React.memo(function ObjectItem({
         className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
         {selectionMode && <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />}
         <View
-          className="items-center justify-center rounded-xl bg-blue-500/10"
+          className="items-center justify-center"
           style={{ width: ICON_SIZE, height: ICON_SIZE }}>
           <Icon as={FolderIcon} className="size-5 text-blue-600" />
         </View>
