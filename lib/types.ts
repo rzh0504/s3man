@@ -18,6 +18,8 @@ export interface S3Config {
   proxyToken?: string;
   /** Short alias for clean share URLs, e.g. "b2", "r2". Registered in Worker KV. */
   proxyAlias?: string;
+  /** Force path-style URLs (e.g. endpoint/bucket) instead of virtual-hosted (bucket.endpoint). Defaults to true for custom providers. */
+  forcePathStyle?: boolean;
 }
 
 // 连接状态

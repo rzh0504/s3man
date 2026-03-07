@@ -16,7 +16,7 @@ import {
 import * as React from 'react';
 import { View, FlatList, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
 import { useT } from '@/lib/i18n';
 import type { TranslationKey } from '@/lib/i18n';
 
@@ -27,7 +27,7 @@ const TABS: { value: TransferFilter; labelKey: TranslationKey; shortLabelKey: Tr
   { value: 'completed', labelKey: 'transfers.completed', shortLabelKey: 'transfers.done' },
 ];
 
-const SPRING_CONFIG = { damping: 16, stiffness: 160 };
+const TIMING_CONFIG = { duration: 200, easing: Easing.out(Easing.quad) };
 
 function AnimatedTab({
   labelKey,
@@ -44,7 +44,7 @@ function AnimatedTab({
   const label = t(labelKey);
   const shortLabel = t(shortLabelKey);
   const animatedStyle = useAnimatedStyle(() => ({
-    flex: withSpring(isActive ? 1.6 : 1, SPRING_CONFIG),
+    flex: withTiming(isActive ? 1.6 : 1, TIMING_CONFIG),
   }));
 
   return (

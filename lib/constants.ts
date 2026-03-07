@@ -91,7 +91,7 @@ const AWS_S3: ProviderInfo = {
 
 const CUSTOM_S3: ProviderInfo = {
   key: 'custom',
-  label: 'Custom S3-Compatible',
+  label: 'Custom',
   description: 'MinIO, Wasabi, DigitalOcean Spaces, etc.',
   defaultEndpoint: '',
   defaultRegion: 'us-east-1',

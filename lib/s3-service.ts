@@ -59,7 +59,7 @@ export function createClientForConnection(connectionId: string, config: S3Config
       accessKeyId: sanitize(config.accessKeyId),
       secretAccessKey: sanitize(config.secretAccessKey),
     },
-    forcePathStyle: true,
+    forcePathStyle: config.forcePathStyle ?? (config.provider === 'backblaze-b2' || config.provider === 'custom'),
   };
 
   if (endpoint) {
@@ -106,7 +106,7 @@ export async function discoverBuckets(config: S3Config): Promise<string[]> {
       accessKeyId: sanitize(config.accessKeyId),
       secretAccessKey: sanitize(config.secretAccessKey),
     },
-    forcePathStyle: true,
+    forcePathStyle: config.forcePathStyle ?? (config.provider === 'backblaze-b2' || config.provider === 'custom'),
   };
   if (endpoint) {
     clientConfig.endpoint = endpoint;

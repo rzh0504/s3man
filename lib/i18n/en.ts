@@ -83,6 +83,8 @@ export default {
   'form.b2SecretPlaceholder': 'B2 Master Application Key',
   'form.secretPlaceholder': 'Enter secret key',
   'form.region': 'Region',
+  'form.pathStyle': 'Path Style Access',
+  'form.pathStyleHelp': 'Use path-style URLs (endpoint/bucket). Disable if your provider requires virtual-hosted style (bucket.endpoint).',
   'form.proxyUrl': 'Proxy URL',
   'form.optional': '(optional)',
   'form.proxyUrlHelp': 'Cloudflare Worker proxy for faster access and clean URLs. Leave empty to use pre-signed S3 URLs.',

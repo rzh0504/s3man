@@ -769,6 +769,27 @@ export default function ConnectionsScreen() {
             )}
           </View>
 
+          {/* Path Style (custom provider only) */}
+          {formConfig.provider === 'custom' && (
+            <View className="mb-6 gap-2">
+              <View className="flex-row items-center gap-3">
+                <Checkbox
+                  checked={formConfig.forcePathStyle !== false}
+                  onCheckedChange={(checked) =>
+                    setFormConfig((p) => ({ ...p, forcePathStyle: !!checked }))
+                  }
+                />
+                <Pressable
+                  onPress={() =>
+                    setFormConfig((p) => ({ ...p, forcePathStyle: p.forcePathStyle === false }))
+                  }>
+                  <Label>{t('form.pathStyle')}</Label>
+                </Pressable>
+              </View>
+              <Text className="text-muted-foreground text-xs">{t('form.pathStyleHelp')}</Text>
+            </View>
+          )}
+
           {/* Proxy URL (optional) */}
           <View className="mb-4 gap-2">
             <Label>

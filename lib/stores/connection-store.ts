@@ -84,7 +84,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
             id: generateId(),
             displayName: legacyConfig.provider === 'cloudflare-r2' ? 'Cloudflare R2' :
               legacyConfig.provider === 'backblaze-b2' ? 'Backblaze B2' :
-              legacyConfig.provider === 'aws-s3' ? 'Amazon S3' : 'Custom S3',
+              legacyConfig.provider === 'aws-s3' ? 'Amazon S3' : 'Custom',
             config: {
               provider: legacyConfig.provider ?? DEFAULT_PROVIDER,
               endpointUrl: legacyConfig.endpointUrl ?? '',

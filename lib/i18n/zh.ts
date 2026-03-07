@@ -83,6 +83,8 @@ export default {
   'form.b2SecretPlaceholder': 'B2 主应用密钥',
   'form.secretPlaceholder': '请输入密钥',
   'form.region': '区域',
+  'form.pathStyle': '路径风格访问',
+  'form.pathStyleHelp': '使用路径风格 URL（endpoint/bucket）。如果服务商要求虚拟主机风格（bucket.endpoint）请关闭。',
   'form.proxyUrl': '代理 URL',
   'form.optional': '（可选）',
   'form.proxyUrlHelp': 'Cloudflare Worker 代理，用于更快访问和简洁 URL。留空则使用预签名 S3 URL。',
