@@ -2,8 +2,6 @@
 
 一个跨平台的 S3 对象存储管理客户端，支持 iOS、Android 和 Web。基于 React Native + Expo 构建。
 
-![screenshots](https://via.placeholder.com/800x400?text=Screenshots+Placeholder)
-
 ## 功能
 
 - 多连接管理 -- 同时管理多个 S3 兼容存储服务
