@@ -2,15 +2,16 @@ import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Button } from '@/components/ui/button';
 import { formatBytes } from '@/lib/constants';
-import { isImageFile, isVideoFile, isCodeFile } from '@/lib/s3-service';
+import { isImageFile, isVideoFile, isCodeFile, isPdfFile } from '@/lib/s3-service';
 import type { S3Object } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
-import { XIcon, DownloadIcon, ExternalLinkIcon, LinkIcon } from 'lucide-react-native';
+import { XIcon, DownloadIcon, ExternalLinkIcon, LinkIcon, GlobeIcon } from 'lucide-react-native';
 import * as React from 'react';
 import { View, Modal, Pressable, Image, ScrollView, Dimensions, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import * as Linking from 'expo-linking';
 import { t } from '@/lib/i18n';
 import Animated, {
   useSharedValue,
@@ -117,13 +118,15 @@ export function FilePreview({
   const isImage = object ? isImageFile(object.name) : false;
   const isVideo = object ? isVideoFile(object.name) : false;
   const isCode = object ? isCodeFile(object.name) : false;
-  const hasPreviewContent = isImage || isVideo || isCode || textContent !== null;
+  const isPdf = object ? isPdfFile(object.name) : false;
+  const hasPreviewContent = isImage || isVideo || isCode || isPdf || textContent !== null;
 
   const sheetHeight = React.useMemo(() => {
     if (isLoading) return SHEET_HEIGHT_MEDIUM;
     if (!hasPreviewContent) return SHEET_HEIGHT_SMALL + insets.bottom;
+    if (isPdf) return SHEET_HEIGHT_SMALL + insets.bottom;
     return SHEET_HEIGHT_MEDIUM;
-  }, [hasPreviewContent, isLoading, insets.bottom]);
+  }, [hasPreviewContent, isPdf, isLoading, insets.bottom]);
 
   const translateY = useSharedValue(SCREEN_HEIGHT);
   const backdropOpacity = useSharedValue(0);
@@ -239,6 +242,26 @@ export function FilePreview({
               <ImagePreview url={previewUrl} />
             ) : isVideo && previewUrl ? (
               <VideoPreview url={previewUrl} />
+            ) : isPdf && previewUrl ? (
+              <View className="items-center gap-3 p-8">
+                <Icon as={ExternalLinkIcon} className="text-muted-foreground size-12" />
+                <Text className="text-muted-foreground text-center text-sm">
+                  {t('preview.pdfHint')}
+                </Text>
+                <Button
+                  onPress={() => Linking.openURL(previewUrl)}
+                  className="mt-2 flex-row items-center gap-2">
+                  <Icon as={GlobeIcon} className="text-primary-foreground size-4" />
+                  <Text className="text-primary-foreground">{t('preview.openInBrowser')}</Text>
+                </Button>
+                <Button
+                  variant="outline"
+                  onPress={onDownload}
+                  className="flex-row items-center gap-2">
+                  <Icon as={DownloadIcon} className="text-foreground size-4" />
+                  <Text className="text-foreground">{t('preview.downloadFile')}</Text>
+                </Button>
+              </View>
             ) : textContent !== null ? (
               <ScrollView className="w-full flex-1" contentContainerClassName="p-4">
                 <View className="bg-muted rounded-lg p-4">

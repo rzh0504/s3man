@@ -156,6 +156,7 @@ export default {
   'bucket.newFolder': 'New Folder',
   'bucket.deleteFiles': 'Delete Files',
   'bucket.deleteFilesDesc': 'Are you sure you want to delete {count} file(s)? This action cannot be undone.',
+  'bucket.deletingFiles': 'Deleting...',
   'bucket.downloadComplete': 'Download Complete',
   'bucket.downloadCompleteDesc': '{name} saved successfully.',
   'bucket.share': 'Share',
@@ -172,6 +173,8 @@ export default {
   // ── File Preview ───────────────────────────────────────────────────────
   'preview.notAvailable': 'Preview not available for this file type.',
   'preview.downloadFile': 'Download File',
+  'preview.pdfHint': 'PDF files can be viewed in your browser.',
+  'preview.openInBrowser': 'Open in Browser',
 
   // ── Handle Share ───────────────────────────────────────────────────────
   'share.noFiles': 'No files to upload',

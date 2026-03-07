@@ -11,13 +11,14 @@ import {
   XIcon,
   Trash2Icon,
   CheckCircleIcon,
-  UploadIcon,
-  DownloadIcon,
-  FileArchiveIcon,
   FileIcon,
   ImageIcon,
   FileVideoIcon,
-  FilmIcon,
+  FileTextIcon,
+  FileArchiveIcon,
+  FileCodeIcon,
+  FileAudioIcon,
+  FileSpreadsheetIcon,
 } from 'lucide-react-native';
 import React from 'react';
 import { View, Image } from 'react-native';
@@ -25,16 +26,51 @@ import { getFileExtension } from '@/lib/constants';
 import { t } from '@/lib/i18n';
 import type { LucideIcon } from 'lucide-react-native';
 
-function getTransferIcon(fileName: string): LucideIcon {
-  const ext = getFileExtension(fileName);
-  const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'];
-  const videoExts = ['mp4', 'mov', 'avi', 'webm'];
-  const archiveExts = ['zip', 'tar', 'gz', 'rar', '7z', 'fig'];
+type FileTypeInfo = { icon: LucideIcon; color: string };
 
-  if (imageExts.includes(ext)) return ImageIcon;
-  if (videoExts.includes(ext)) return FilmIcon;
-  if (archiveExts.includes(ext)) return FileArchiveIcon;
-  return FileIcon;
+function getFileTypeInfo(name: string): FileTypeInfo {
+  const ext = getFileExtension(name);
+  const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'];
+  const videoExts = ['mp4', 'mov', 'avi', 'webm', 'mkv'];
+  const audioExts = ['mp3', 'wav', 'ogg', 'aac', 'm4a', 'flac', 'wma'];
+  const archiveExts = ['zip', 'tar', 'gz', 'rar', '7z'];
+  const codeExts = [
+    'json',
+    'xml',
+    'html',
+    'css',
+    'js',
+    'ts',
+    'tsx',
+    'jsx',
+    'py',
+    'yaml',
+    'yml',
+    'c',
+    'cpp',
+    'toml',
+    'lua',
+    'rs',
+    'go',
+    'swift',
+    'kt',
+    'dart',
+    'sh',
+    'sql',
+    'rb',
+    'java',
+  ];
+  const spreadsheetExts = ['xls', 'xlsx', 'csv'];
+  const textExts = ['txt', 'md', 'log', 'pdf', 'doc', 'docx'];
+
+  if (imageExts.includes(ext)) return { icon: ImageIcon, color: 'text-emerald-600' };
+  if (videoExts.includes(ext)) return { icon: FileVideoIcon, color: 'text-purple-600' };
+  if (audioExts.includes(ext)) return { icon: FileAudioIcon, color: 'text-pink-600' };
+  if (archiveExts.includes(ext)) return { icon: FileArchiveIcon, color: 'text-amber-600' };
+  if (codeExts.includes(ext)) return { icon: FileCodeIcon, color: 'text-blue-600' };
+  if (spreadsheetExts.includes(ext)) return { icon: FileSpreadsheetIcon, color: 'text-green-600' };
+  if (textExts.includes(ext)) return { icon: FileTextIcon, color: 'text-sky-600' };
+  return { icon: FileIcon, color: 'text-muted-foreground' };
 }
 
 function getProgressColor(status: TransferTask['status']): string {
@@ -65,7 +101,7 @@ export const TransferItem = React.memo(function TransferItem({
   onCancel,
   onRemove,
 }: TransferItemProps) {
-  const TransferIcon = getTransferIcon(task.fileName);
+  const fileTypeInfo = getFileTypeInfo(task.fileName);
   const isImage = (() => {
     const ext = getFileExtension(task.fileName);
     return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(ext);
@@ -112,7 +148,7 @@ export const TransferItem = React.memo(function TransferItem({
               resizeMode="cover"
             />
           ) : (
-            <Icon as={TransferIcon} className="text-muted-foreground size-6" />
+            <Icon as={fileTypeInfo.icon} className={`${fileTypeInfo.color} size-6`} />
           )}
           <View className="flex-1">
             <Text className="text-foreground text-sm font-medium" numberOfLines={1}>

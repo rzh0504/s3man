@@ -156,6 +156,7 @@ export default {
   'bucket.newFolder': '新建文件夹',
   'bucket.deleteFiles': '删除文件',
   'bucket.deleteFilesDesc': '确定要删除 {count} 个文件吗？此操作不可撤销。',
+  'bucket.deletingFiles': '删除中...',
   'bucket.downloadComplete': '下载完成',
   'bucket.downloadCompleteDesc': '{name} 已保存成功。',
   'bucket.share': '分享',
@@ -172,6 +173,8 @@ export default {
   // ── 文件预览 ───────────────────────────────────────────────────────────
   'preview.notAvailable': '此文件类型不支持预览。',
   'preview.downloadFile': '下载文件',
+  'preview.pdfHint': 'PDF 文件可在浏览器中查看。',
+  'preview.openInBrowser': '在浏览器中打开',
 
   // ── 分享上传 ───────────────────────────────────────────────────────────
   'share.noFiles': '没有可上传的文件',

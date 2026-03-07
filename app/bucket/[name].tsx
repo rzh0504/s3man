@@ -167,6 +167,7 @@ export default function ObjectBrowserScreen() {
 
   // Dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
+  const [isDeletingFiles, setIsDeletingFiles] = React.useState(false);
   const [downloadCompleteDialog, setDownloadCompleteDialog] = React.useState<{
     name: string;
     uri: string;
@@ -383,6 +384,9 @@ export default function ObjectBrowserScreen() {
 
         if (S3Service.isImageFile(obj.name) || S3Service.isVideoFile(obj.name)) {
           setPreviewUrl(url);
+        } else if (S3Service.isPdfFile(obj.name)) {
+          // PDF: store the URL so preview can offer "open in browser"
+          setPreviewUrl(url);
         } else if (S3Service.isCodeFile(obj.name)) {
           // Fetch text content for code/text files
           const headers = S3Service.getProxyHeaders(connectionId) || {};
@@ -485,6 +489,7 @@ export default function ObjectBrowserScreen() {
   const confirmDelete = React.useCallback(async () => {
     if (!bucketName || !connectionId) return;
     const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
+    setIsDeletingFiles(true);
     try {
       await S3Service.deleteObjects(
         connectionId,
@@ -497,6 +502,7 @@ export default function ObjectBrowserScreen() {
     } catch (error: any) {
       console.error('Delete failed:', error);
     } finally {
+      setIsDeletingFiles(false);
       setDeleteDialogOpen(false);
     }
   }, [bucketName, connectionId, objects, selectedKeys, clearSelection, loadObjects]);
@@ -587,12 +593,15 @@ export default function ObjectBrowserScreen() {
           progressTimer = setInterval(() => {
             if (currentProgress < 90) {
               currentProgress = Math.min(90, currentProgress + increment);
-              const estimatedBytes = Math.round((currentProgress / 100) * fileSize);
-              updateTask(taskId, {
-                progress: Math.round(currentProgress),
-                transferredBytes: estimatedBytes,
-              });
+            } else if (currentProgress < 99) {
+              // Slow crawl from 90→99 so the bar never appears stuck
+              currentProgress = Math.min(99, currentProgress + 0.5);
             }
+            const estimatedBytes = Math.round((currentProgress / 100) * fileSize);
+            updateTask(taskId, {
+              progress: Math.round(currentProgress),
+              transferredBytes: estimatedBytes,
+            });
           }, interval);
 
           // 3. Upload file to presigned URL via expo-file-system (avoids RN fetch blob issues)
@@ -998,11 +1007,15 @@ export default function ObjectBrowserScreen() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeletingFiles}>
               <Text>{t('cancel')}</Text>
             </AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onPress={confirmDelete}>
-              <Text>{t('delete')}</Text>
+            <AlertDialogAction
+              variant="destructive"
+              onPress={confirmDelete}
+              disabled={isDeletingFiles}>
+              {isDeletingFiles && <ActivityIndicator size="small" color="#fff" />}
+              <Text>{isDeletingFiles ? t('bucket.deletingFiles') : t('delete')}</Text>
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

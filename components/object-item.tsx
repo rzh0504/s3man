@@ -27,7 +27,23 @@ function getFileTypeInfo(name: string): FileTypeInfo {
   const videoExts = ['mp4', 'mov', 'avi', 'webm', 'mkv'];
   const audioExts = ['mp3', 'wav', 'ogg', 'aac', 'm4a', 'flac', 'wma'];
   const archiveExts = ['zip', 'tar', 'gz', 'rar', '7z'];
-  const codeExts = ['json', 'xml', 'html', 'css', 'js', 'ts', 'tsx', 'jsx'];
+  const codeExts = [
+    'json',
+    'xml',
+    'html',
+    'css',
+    'js',
+    'ts',
+    'tsx',
+    'jsx',
+    'py',
+    'yaml',
+    'c',
+    'cpp',
+    'toml',
+    'lua',
+    'rs',
+  ];
   const spreadsheetExts = ['xls', 'xlsx', 'csv'];
   const textExts = ['txt', 'md', 'log', 'pdf', 'doc', 'docx'];
 

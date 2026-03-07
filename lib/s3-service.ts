@@ -596,6 +596,35 @@ export function guessMimeType(fileName: string): string {
     css: 'text/css',
     js: 'application/javascript',
     ts: 'text/typescript',
+    tsx: 'text/typescript',
+    jsx: 'text/javascript',
+    yaml: 'text/yaml',
+    yml: 'text/yaml',
+    toml: 'text/plain',
+    ini: 'text/plain',
+    env: 'text/plain',
+    conf: 'text/plain',
+    cfg: 'text/plain',
+    sh: 'text/x-shellscript',
+    bat: 'text/plain',
+    py: 'text/x-python',
+    rb: 'text/x-ruby',
+    java: 'text/x-java',
+    go: 'text/x-go',
+    rs: 'text/x-rust',
+    lua: 'text/x-lua',
+    c: 'text/x-c',
+    cpp: 'text/x-c++',
+    h: 'text/x-c',
+    hpp: 'text/x-c++',
+    swift: 'text/x-swift',
+    kt: 'text/x-kotlin',
+    dart: 'text/x-dart',
+    sql: 'text/x-sql',
+    graphql: 'text/plain',
+    dockerfile: 'text/plain',
+    makefile: 'text/plain',
+    properties: 'text/plain',
     // Documents
     pdf: 'application/pdf',
     doc: 'application/msword',
@@ -612,7 +641,7 @@ export function guessMimeType(fileName: string): string {
   return mimeMap[ext] || 'application/octet-stream';
 }
 
-/** Check if a file is previewable (image, video, or text/code) */
+/** Check if a file is previewable (image, video, text/code, or PDF) */
 export function isPreviewable(fileName: string): boolean {
   const mime = guessMimeType(fileName);
   return (
@@ -621,7 +650,8 @@ export function isPreviewable(fileName: string): boolean {
     mime.startsWith('text/') ||
     mime === 'application/json' ||
     mime === 'application/xml' ||
-    mime === 'application/javascript'
+    mime === 'application/javascript' ||
+    mime === 'application/pdf'
   );
 }
 
@@ -638,6 +668,11 @@ export function isAudioFile(fileName: string): boolean {
 /** Check if a file is a video file */
 export function isVideoFile(fileName: string): boolean {
   return guessMimeType(fileName).startsWith('video/');
+}
+
+/** Check if a file is a PDF */
+export function isPdfFile(fileName: string): boolean {
+  return guessMimeType(fileName) === 'application/pdf';
 }
 
 /** Check if a file is a code/text file that should be shown with monospace */
