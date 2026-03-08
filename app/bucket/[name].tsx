@@ -6,6 +6,8 @@ import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
+import { ScreenTransitionView } from '@/components/ui/screen-transition-view';
 import {
   Dialog,
   DialogContent,
@@ -67,6 +69,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { FadeInDown, FadeOutDown, FadeOutUp, ReduceMotion } from 'react-native-reanimated';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -767,7 +770,7 @@ export default function ObjectBrowserScreen() {
   }, [objects, currentPrefix]);
 
   return (
-    <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+    <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
       {/* Custom Header */}
       <View className="flex-row items-center gap-2 px-4 pt-3 pb-2">
         <Pressable
@@ -857,81 +860,97 @@ export default function ObjectBrowserScreen() {
 
       {/* Upload Progress Overlay */}
       {uploadProgress && (
-        <View
-          className="border-border bg-background/95 absolute right-0 left-0 border-t px-4 py-3"
-          style={{ bottom: 70 + Math.max(insets.bottom, 12) }}>
-          <View className="mb-2 flex-row items-center justify-between">
-            <View className="flex-row items-center gap-2">
-              <Icon as={UploadIcon} className="text-primary size-4" />
-              <Text className="text-foreground text-sm font-medium">
-                {t('bucket.uploadingProgress', {
-                  completed: uploadProgress.completed,
-                  total: uploadProgress.total,
-                })}
+        <NativeOnlyAnimatedView
+          entering={FadeInDown.duration(180).reduceMotion(ReduceMotion.System)}
+          exiting={FadeOutDown.duration(140).reduceMotion(ReduceMotion.System)}>
+          <View
+            className="border-border bg-background/95 absolute right-0 left-0 border-t px-4 py-3"
+            style={{ bottom: 70 + Math.max(insets.bottom, 12) }}>
+            <View className="mb-2 flex-row items-center justify-between">
+              <View className="flex-row items-center gap-2">
+                <Icon as={UploadIcon} className="text-primary size-4" />
+                <Text className="text-foreground text-sm font-medium">
+                  {t('bucket.uploadingProgress', {
+                    completed: uploadProgress.completed,
+                    total: uploadProgress.total,
+                  })}
+                </Text>
+              </View>
+              <Text className="text-foreground text-sm font-semibold">
+                {uploadProgress.progress}%
               </Text>
             </View>
-            <Text className="text-foreground text-sm font-semibold">
-              {uploadProgress.progress}%
+            <Progress
+              value={uploadProgress.progress}
+              className="h-2"
+              indicatorClassName="bg-primary"
+            />
+            <Text className="text-muted-foreground mt-1 text-xs">
+              {formatBytes(uploadProgress.transferred)} / {formatBytes(uploadProgress.totalBytes)}
             </Text>
           </View>
-          <Progress
-            value={uploadProgress.progress}
-            className="h-2"
-            indicatorClassName="bg-primary"
-          />
-          <Text className="text-muted-foreground mt-1 text-xs">
-            {formatBytes(uploadProgress.transferred)} / {formatBytes(uploadProgress.totalBytes)}
-          </Text>
-        </View>
+        </NativeOnlyAnimatedView>
       )}
 
       {/* Bottom Action Bar */}
       {selectedCount > 0 && (
-        <View
-          className="border-border bg-background absolute right-0 bottom-0 left-0 border-t px-4 py-3"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) }}>
-          <View className="flex-row items-center justify-between">
-            <View>
-              <Text className="text-foreground text-sm font-medium">
-                {t('bucket.selectedCount', { count: selectedCount })}
-              </Text>
-              <Text className="text-muted-foreground text-xs">
-                {t('bucket.objectCount', { count: fileCount })}
-              </Text>
-            </View>
-            <View className="flex-row gap-2">
-              <Button variant="ghost" size="icon" onPress={handleDelete} className="size-10">
-                <Icon as={Trash2Icon} className="text-destructive size-5" />
-              </Button>
-              <Button
-                variant="outline"
-                onPress={handlePull}
-                className="flex-row items-center gap-2">
-                <Icon as={DownloadIcon} className="text-foreground size-4" />
-                <Text>{t('bucket.download')}</Text>
-              </Button>
+        <NativeOnlyAnimatedView
+          entering={FadeInDown.duration(180).reduceMotion(ReduceMotion.System)}
+          exiting={FadeOutDown.duration(140).reduceMotion(ReduceMotion.System)}>
+          <View
+            className="border-border bg-background absolute right-0 bottom-0 left-0 border-t px-4 py-3"
+            style={{ paddingBottom: Math.max(insets.bottom, 12) }}>
+            <View className="flex-row items-center justify-between">
+              <View>
+                <Text className="text-foreground text-sm font-medium">
+                  {t('bucket.selectedCount', { count: selectedCount })}
+                </Text>
+                <Text className="text-muted-foreground text-xs">
+                  {t('bucket.objectCount', { count: fileCount })}
+                </Text>
+              </View>
+              <View className="flex-row gap-2">
+                <Button variant="ghost" size="icon" onPress={handleDelete} className="size-10">
+                  <Icon as={Trash2Icon} className="text-destructive size-5" />
+                </Button>
+                <Button
+                  variant="outline"
+                  onPress={handlePull}
+                  className="flex-row items-center gap-2">
+                  <Icon as={DownloadIcon} className="text-foreground size-4" />
+                  <Text>{t('bucket.download')}</Text>
+                </Button>
+              </View>
             </View>
           </View>
-        </View>
+        </NativeOnlyAnimatedView>
       )}
 
       {/* Long-press hint — fixed at bottom */}
       {!selectionMode && selectedCount === 0 && (
-        <View
-          className="absolute right-0 bottom-0 left-0 items-center"
-          style={{ paddingBottom: Math.max(insets.bottom, 8) }}
-          pointerEvents="none">
-          <Text className="text-muted-foreground/60 text-xs">{t('bucket.longPressHint')}</Text>
-        </View>
+        <NativeOnlyAnimatedView
+          entering={FadeInDown.duration(180).delay(80).reduceMotion(ReduceMotion.System)}
+          exiting={FadeOutDown.duration(120).reduceMotion(ReduceMotion.System)}>
+          <View
+            className="absolute right-0 bottom-0 left-0 items-center"
+            style={{ paddingBottom: Math.max(insets.bottom, 8) }}
+            pointerEvents="none">
+            <Text className="text-muted-foreground/60 text-xs">{t('bucket.longPressHint')}</Text>
+          </View>
+        </NativeOnlyAnimatedView>
       )}
 
       {/* FAB backdrop */}
       {fabExpanded && (
-        <Pressable
-          onPress={() => setFabExpanded(false)}
-          className="absolute inset-0"
-          style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}
-        />
+        <NativeOnlyAnimatedView
+          entering={FadeInDown.duration(160).reduceMotion(ReduceMotion.System)}
+          exiting={FadeOutDown.duration(120).reduceMotion(ReduceMotion.System)}>
+          <Pressable
+            onPress={() => setFabExpanded(false)}
+            className="absolute inset-0"
+            style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}
+          />
+        </NativeOnlyAnimatedView>
       )}
 
       {/* FAB — Expandable actions */}
@@ -942,34 +961,38 @@ export default function ObjectBrowserScreen() {
             bottom: 24 + Math.max(insets.bottom, 12),
           }}>
           {fabExpanded && (
-            <>
-              <Pressable
-                onPress={() => {
-                  setFabExpanded(false);
-                  handleUpload();
-                }}
-                className="bg-secondary active:bg-secondary/80 flex-row items-center gap-2 rounded-full px-4 shadow-lg shadow-black/25"
-                style={{ height: 44 }}>
-                <Icon as={UploadIcon} className="text-secondary-foreground size-5" />
-                <Text className="text-secondary-foreground text-sm font-medium">
-                  {t('bucket.upload')}
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setFabExpanded(false);
-                  setNewFolderName('');
-                  setCreateFolderError('');
-                  setShowCreateFolderDialog(true);
-                }}
-                className="bg-secondary active:bg-secondary/80 flex-row items-center gap-2 rounded-full px-4 shadow-lg shadow-black/25"
-                style={{ height: 44 }}>
-                <Icon as={FolderPlusIcon} className="text-secondary-foreground size-5" />
-                <Text className="text-secondary-foreground text-sm font-medium">
-                  {t('bucket.newFolder')}
-                </Text>
-              </Pressable>
-            </>
+            <NativeOnlyAnimatedView
+              entering={FadeInDown.duration(180).reduceMotion(ReduceMotion.System)}
+              exiting={FadeOutUp.duration(120).reduceMotion(ReduceMotion.System)}>
+              <View className="items-end gap-3">
+                <Pressable
+                  onPress={() => {
+                    setFabExpanded(false);
+                    handleUpload();
+                  }}
+                  className="bg-secondary active:bg-secondary/80 flex-row items-center gap-2 rounded-full px-4 shadow-lg shadow-black/25"
+                  style={{ height: 44 }}>
+                  <Icon as={UploadIcon} className="text-secondary-foreground size-5" />
+                  <Text className="text-secondary-foreground text-sm font-medium">
+                    {t('bucket.upload')}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setFabExpanded(false);
+                    setNewFolderName('');
+                    setCreateFolderError('');
+                    setShowCreateFolderDialog(true);
+                  }}
+                  className="bg-secondary active:bg-secondary/80 flex-row items-center gap-2 rounded-full px-4 shadow-lg shadow-black/25"
+                  style={{ height: 44 }}>
+                  <Icon as={FolderPlusIcon} className="text-secondary-foreground size-5" />
+                  <Text className="text-secondary-foreground text-sm font-medium">
+                    {t('bucket.newFolder')}
+                  </Text>
+                </Pressable>
+              </View>
+            </NativeOnlyAnimatedView>
           )}
           <Pressable
             onPress={() => setFabExpanded((v) => !v)}
@@ -1121,6 +1144,6 @@ export default function ObjectBrowserScreen() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </View>
+    </ScreenTransitionView>
   );
 }

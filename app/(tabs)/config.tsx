@@ -1,5 +1,7 @@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Icon } from '@/components/ui/icon';
+import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
+import { ScreenTransitionView } from '@/components/ui/screen-transition-view';
 import { Separator } from '@/components/ui/separator';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
@@ -19,11 +21,13 @@ import * as React from 'react';
 import { View, ScrollView, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
+  FadeInDown,
   useSharedValue,
   useAnimatedStyle,
   withTiming,
   withSequence,
   Easing,
+  ReduceMotion,
 } from 'react-native-reanimated';
 import { Uniwind, useUniwind } from 'uniwind';
 import { useRouter } from 'expo-router';
@@ -57,7 +61,7 @@ export default function ConfigScreen() {
   }, [language, setLanguage]);
 
   return (
-    <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+    <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
       {/* Header */}
       <View className="px-6 pt-4 pb-3">
         <View className="flex-row items-center gap-2.5">
@@ -70,27 +74,30 @@ export default function ConfigScreen() {
 
       <ScrollView className="flex-1" contentContainerClassName="px-6 pb-12 pt-3">
         {/* ── Connections ─────────────────────────────────────────────── */}
-        <Pressable
-          onPress={() => router.push('/connections' as any)}
-          className="border-border bg-card active:bg-accent rounded-xl border">
-          <View className="flex-row items-center gap-3 px-4 py-3.5">
-            <Icon as={WifiIcon} className="text-foreground size-5" />
-            <View className="flex-1">
-              <Text className="text-foreground text-sm font-medium">
-                {t('settings.connections')}
-              </Text>
-              <Text className="text-muted-foreground mt-0.5 text-xs">
-                {t('settings.connectionsDesc')}
-              </Text>
+        <NativeOnlyAnimatedView
+          entering={FadeInDown.duration(200).reduceMotion(ReduceMotion.System)}>
+          <Pressable
+            onPress={() => router.push('/connections' as any)}
+            className="border-border bg-card active:bg-accent rounded-xl border">
+            <View className="flex-row items-center gap-3 px-4 py-3.5">
+              <Icon as={WifiIcon} className="text-foreground size-5" />
+              <View className="flex-1">
+                <Text className="text-foreground text-sm font-medium">
+                  {t('settings.connections')}
+                </Text>
+                <Text className="text-muted-foreground mt-0.5 text-xs">
+                  {t('settings.connectionsDesc')}
+                </Text>
+              </View>
+              <Badge variant="secondary">
+                <Text className="text-xs">
+                  {connectedCount}/{connections.length}
+                </Text>
+              </Badge>
+              <Icon as={ChevronRightIcon} className="text-muted-foreground size-4" />
             </View>
-            <Badge variant="secondary">
-              <Text className="text-xs">
-                {connectedCount}/{connections.length}
-              </Text>
-            </Badge>
-            <Icon as={ChevronRightIcon} className="text-muted-foreground size-4" />
-          </View>
-        </Pressable>
+          </Pressable>
+        </NativeOnlyAnimatedView>
 
         {/* ── General ─────────────────────────────────────────────────── */}
         <Separator className="my-6" />
@@ -99,66 +106,69 @@ export default function ConfigScreen() {
           <Text className="text-foreground text-lg font-semibold">{t('settings.general')}</Text>
         </View>
 
-        <View className="border-border bg-card rounded-xl border">
-          {/* Theme */}
-          <Pressable
-            onPress={toggleTheme}
-            className="active:bg-accent flex-row items-center justify-between px-4 py-3.5">
-            <View className="mr-4 flex-1">
-              <Text className="text-foreground text-sm font-medium">{t('settings.darkMode')}</Text>
-              <Text className="text-muted-foreground mt-0.5 text-xs">
-                {t('settings.darkModeDesc')}
-              </Text>
-            </View>
-            <Animated.View style={themeIconStyle}>
-              <Icon
-                as={theme === 'dark' ? SunIcon : MoonIcon}
-                className="text-muted-foreground size-5"
+        <NativeOnlyAnimatedView
+          entering={FadeInDown.duration(220).delay(60).reduceMotion(ReduceMotion.System)}>
+          <View className="border-border bg-card rounded-xl border">
+            {/* Theme */}
+            <Pressable
+              onPress={toggleTheme}
+              className="active:bg-accent flex-row items-center justify-between px-4 py-3.5">
+              <View className="mr-4 flex-1">
+                <Text className="text-foreground text-sm font-medium">{t('settings.darkMode')}</Text>
+                <Text className="text-muted-foreground mt-0.5 text-xs">
+                  {t('settings.darkModeDesc')}
+                </Text>
+              </View>
+              <Animated.View style={themeIconStyle}>
+                <Icon
+                  as={theme === 'dark' ? SunIcon : MoonIcon}
+                  className="text-muted-foreground size-5"
+                />
+              </Animated.View>
+            </Pressable>
+
+            <Separator />
+
+            {/* Thumbnails */}
+            <Pressable
+              onPress={() => setShowThumbnails(!showThumbnails)}
+              className="active:bg-accent flex-row items-center justify-between px-4 py-3.5">
+              <View className="mr-4 flex-1">
+                <Text className="text-foreground text-sm font-medium">
+                  {t('settings.thumbnails')}
+                </Text>
+                <Text className="text-muted-foreground mt-0.5 text-xs">
+                  {t('settings.thumbnailsDesc')}
+                </Text>
+              </View>
+              <Checkbox
+                checked={showThumbnails}
+                onCheckedChange={(checked) => setShowThumbnails(!!checked)}
               />
-            </Animated.View>
-          </Pressable>
+            </Pressable>
 
-          <Separator />
+            <Separator />
 
-          {/* Thumbnails */}
-          <Pressable
-            onPress={() => setShowThumbnails(!showThumbnails)}
-            className="active:bg-accent flex-row items-center justify-between px-4 py-3.5">
-            <View className="mr-4 flex-1">
-              <Text className="text-foreground text-sm font-medium">
-                {t('settings.thumbnails')}
-              </Text>
-              <Text className="text-muted-foreground mt-0.5 text-xs">
-                {t('settings.thumbnailsDesc')}
-              </Text>
-            </View>
-            <Checkbox
-              checked={showThumbnails}
-              onCheckedChange={(checked) => setShowThumbnails(!!checked)}
-            />
-          </Pressable>
-
-          <Separator />
-
-          {/* Language */}
-          <Pressable
-            onPress={toggleLanguage}
-            className="active:bg-accent flex-row items-center justify-between px-4 py-3.5">
-            <View className="mr-4 flex-1">
-              <Text className="text-foreground text-sm font-medium">{t('settings.language')}</Text>
-              <Text className="text-muted-foreground mt-0.5 text-xs">
-                {t('settings.languageDesc')}
-              </Text>
-            </View>
-            <View className="flex-row items-center gap-2">
-              <Text className="text-muted-foreground text-sm">
-                {language === 'zh' ? t('settings.languageZh') : t('settings.languageEn')}
-              </Text>
-              <Icon as={LanguagesIcon} className="text-muted-foreground size-5" />
-            </View>
-          </Pressable>
-        </View>
+            {/* Language */}
+            <Pressable
+              onPress={toggleLanguage}
+              className="active:bg-accent flex-row items-center justify-between px-4 py-3.5">
+              <View className="mr-4 flex-1">
+                <Text className="text-foreground text-sm font-medium">{t('settings.language')}</Text>
+                <Text className="text-muted-foreground mt-0.5 text-xs">
+                  {t('settings.languageDesc')}
+                </Text>
+              </View>
+              <View className="flex-row items-center gap-2">
+                <Text className="text-muted-foreground text-sm">
+                  {language === 'zh' ? t('settings.languageZh') : t('settings.languageEn')}
+                </Text>
+                <Icon as={LanguagesIcon} className="text-muted-foreground size-5" />
+              </View>
+            </Pressable>
+          </View>
+        </NativeOnlyAnimatedView>
       </ScrollView>
-    </View>
+    </ScreenTransitionView>
   );
 }

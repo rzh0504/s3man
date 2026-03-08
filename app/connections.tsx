@@ -13,6 +13,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Icon } from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
+import { ScreenTransitionView } from '@/components/ui/screen-transition-view';
 import { Separator } from '@/components/ui/separator';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
@@ -56,6 +58,7 @@ import * as DocumentPicker from 'expo-document-picker';
 
 import { useRouter } from 'expo-router';
 import { useT } from '@/lib/i18n';
+import Animated, { FadeInDown, FadeOutUp, ReduceMotion } from 'react-native-reanimated';
 
 const DEFAULT_CONFIG: S3Config = {
   provider: 'cloudflare-r2',
@@ -70,11 +73,13 @@ const DEFAULT_CONFIG: S3Config = {
 
 function ConnectionCard({
   conn,
+  index,
   onEdit,
   onDelete,
   onReconnect,
 }: {
   conn: S3Connection;
+  index: number;
   onEdit: () => void;
   onDelete: () => void;
   onReconnect: () => void;
@@ -101,7 +106,12 @@ function ConnectionCard({
           : t('conn.statusOffline');
 
   return (
-    <View className="border-border bg-card rounded-xl border p-4">
+    <Animated.View
+      entering={FadeInDown.duration(200)
+        .delay(Math.min(index * 40, 160))
+        .reduceMotion(ReduceMotion.System)}
+      exiting={FadeOutUp.duration(140).reduceMotion(ReduceMotion.System)}
+      className="border-border bg-card rounded-xl border p-4">
       <View className="flex-row items-center gap-3">
         <ProviderIcon provider={conn.config.provider} size={28} />
         <View className="flex-1">
@@ -168,7 +178,7 @@ function ConnectionCard({
           <Icon as={TrashIcon} className="text-destructive size-3.5" />
         </Pressable>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -542,26 +552,27 @@ export default function ConnectionsScreen() {
         className="bg-background flex-1"
         style={{ paddingTop: insets.top }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView
-          className="flex-1"
-          contentContainerClassName="p-6 pb-12"
-          keyboardShouldPersistTaps="handled">
-          {/* Form Header */}
-          <View className="mb-4 flex-row items-center gap-2.5">
-            <Pressable onPress={handleCancel} className="rounded-md p-1">
-              <Icon as={XIcon} className="text-foreground size-6" />
-            </Pressable>
-            <Text className="text-foreground flex-1 text-xl font-bold">
-              {editingId ? t('conn.editConnection') : t('conn.newConnection')}
-            </Text>
-          </View>
-
-          {/* Error Message */}
-          {formError ? (
-            <View className="bg-destructive/10 mb-4 rounded-lg p-3">
-              <Text className="text-destructive text-sm">{formError}</Text>
+        <ScreenTransitionView className="flex-1">
+          <ScrollView
+            className="flex-1"
+            contentContainerClassName="p-6 pb-12"
+            keyboardShouldPersistTaps="handled">
+            {/* Form Header */}
+            <View className="mb-4 flex-row items-center gap-2.5">
+              <Pressable onPress={handleCancel} className="rounded-md p-1">
+                <Icon as={XIcon} className="text-foreground size-6" />
+              </Pressable>
+              <Text className="text-foreground flex-1 text-xl font-bold">
+                {editingId ? t('conn.editConnection') : t('conn.newConnection')}
+              </Text>
             </View>
-          ) : null}
+
+            {/* Error Message */}
+            {formError ? (
+              <View className="bg-destructive/10 mb-4 rounded-lg p-3">
+                <Text className="text-destructive text-sm">{formError}</Text>
+              </View>
+            ) : null}
 
           {/* Display Name */}
           <View className="mb-4 gap-2">
@@ -938,7 +949,8 @@ export default function ConnectionsScreen() {
               )}
             </Button>
           </View>
-        </ScrollView>
+          </ScrollView>
+        </ScreenTransitionView>
       </KeyboardAvoidingView>
     );
   }
@@ -946,7 +958,7 @@ export default function ConnectionsScreen() {
   // ── Connection List View ───────────────────────────────────────────────
 
   return (
-    <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+    <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
       {/* Page Header */}
       <View className="px-6 pt-4 pb-3">
         <View className="flex-row items-center gap-2.5">
@@ -976,10 +988,11 @@ export default function ConnectionsScreen() {
           </View>
         ) : (
           <View className="gap-3">
-            {connections.map((conn) => (
+            {connections.map((conn, index) => (
               <ConnectionCard
                 key={conn.id}
                 conn={conn}
+                index={index}
                 onEdit={() => openEditForm(conn)}
                 onDelete={() => handleDelete(conn)}
                 onReconnect={() => connectOne(conn.id)}
@@ -1005,15 +1018,21 @@ export default function ConnectionsScreen() {
 
         {/* Import result banner */}
         {importResult && (
-          <View
-            className={`mb-3 rounded-lg p-3 ${
-              importResult.success ? 'bg-green-500/10' : 'bg-destructive/10'
-            }`}>
-            <Text
-              className={`text-sm ${importResult.success ? 'text-green-600' : 'text-destructive'}`}>
-              {importResult.text}
-            </Text>
-          </View>
+          <NativeOnlyAnimatedView
+            entering={FadeInDown.duration(180).reduceMotion(ReduceMotion.System)}
+            exiting={FadeOutUp.duration(140).reduceMotion(ReduceMotion.System)}>
+            <View
+              className={`mb-3 rounded-lg p-3 ${
+                importResult.success ? 'bg-green-500/10' : 'bg-destructive/10'
+              }`}>
+              <Text
+                className={`text-sm ${
+                  importResult.success ? 'text-green-600' : 'text-destructive'
+                }`}>
+                {importResult.text}
+              </Text>
+            </View>
+          </NativeOnlyAnimatedView>
         )}
 
         {/* Export Button */}
@@ -1078,6 +1097,6 @@ export default function ConnectionsScreen() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </View>
+    </ScreenTransitionView>
   );
 }

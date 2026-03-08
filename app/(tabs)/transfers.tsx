@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
+import { ScreenTransitionView } from '@/components/ui/screen-transition-view';
 import { Text } from '@/components/ui/text';
 import { Separator } from '@/components/ui/separator';
 import { TransferItem } from '@/components/transfer-item';
@@ -90,7 +91,7 @@ export default function TransfersScreen() {
   );
 
   return (
-    <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+    <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
       {/* Header */}
       <View className="px-6 pt-4 pb-3">
         <View className="flex-row items-center gap-2.5">
@@ -132,6 +133,6 @@ export default function TransfersScreen() {
           />
         }
       />
-    </View>
+    </ScreenTransitionView>
   );
 }

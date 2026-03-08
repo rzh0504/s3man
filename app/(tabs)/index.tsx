@@ -24,6 +24,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
+import { ScreenTransitionView } from '@/components/ui/screen-transition-view';
 import { BucketItem } from '@/components/bucket-item';
 import { EmptyState } from '@/components/empty-state';
 import { useConnectionStore } from '@/lib/stores/connection-store';
@@ -55,7 +57,18 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { FadeIn, FadeOut, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import Animated, {
+  FadeIn,
+  FadeInDown,
+  FadeOut,
+  FadeOutUp,
+  ReduceMotion,
+  StretchInY,
+  StretchOutY,
+  useAnimatedStyle,
+  withTiming,
+  LinearTransition,
+} from 'react-native-reanimated';
 import { useT } from '@/lib/i18n';
 
 interface ProviderSection {
@@ -84,6 +97,7 @@ function BucketListSkeleton() {
 
 function ProviderSectionCard({
   section,
+  index,
   collapsed,
   onToggle,
   onBucketPress,
@@ -91,6 +105,7 @@ function ProviderSectionCard({
   onDeleteBucket,
 }: {
   section: ProviderSection;
+  index: number;
   collapsed: boolean;
   onToggle: () => void;
   onBucketPress: (bucket: BucketInfo) => void;
@@ -106,7 +121,13 @@ function ProviderSectionCard({
   }));
 
   return (
-    <View className="border-border bg-card mx-4 mb-3 overflow-hidden rounded-xl border">
+    <Animated.View
+      layout={LinearTransition.duration(220).reduceMotion(ReduceMotion.System)}
+      entering={FadeInDown.duration(200)
+        .delay(Math.min(index * 40, 160))
+        .reduceMotion(ReduceMotion.System)}
+      exiting={FadeOutUp.duration(140).reduceMotion(ReduceMotion.System)}
+      className="border-border bg-card mx-4 mb-3 overflow-hidden rounded-xl border">
       {/* Header — always visible */}
       <Pressable
         onPress={onToggle}
@@ -138,25 +159,33 @@ function ProviderSectionCard({
 
       {/* Bucket list — collapsible */}
       {!collapsed && (
-        <Animated.View entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)}>
+        <NativeOnlyAnimatedView
+          entering={StretchInY.duration(220)
+            .reduceMotion(ReduceMotion.System)}
+          exiting={StretchOutY.duration(180)
+            .reduceMotion(ReduceMotion.System)}>
           <Separator />
-          {section.buckets.length === 0 ? (
-            <View className="items-center py-6">
-              <Text className="text-muted-foreground text-sm">{t('buckets.noBuckets')}</Text>
-            </View>
-          ) : (
-            section.buckets.map((bucket) => (
-              <BucketItem
-                key={`${bucket.connectionId}-${bucket.name}`}
-                bucket={bucket}
-                onPress={() => onBucketPress(bucket)}
-                onLongPress={() => onDeleteBucket(bucket)}
-              />
-            ))
-          )}
-        </Animated.View>
+          <Animated.View
+            entering={FadeIn.duration(140).delay(40).reduceMotion(ReduceMotion.System)}
+            exiting={FadeOut.duration(90).reduceMotion(ReduceMotion.System)}>
+            {section.buckets.length === 0 ? (
+              <View className="items-center py-6">
+                <Text className="text-muted-foreground text-sm">{t('buckets.noBuckets')}</Text>
+              </View>
+            ) : (
+              section.buckets.map((bucket) => (
+                <BucketItem
+                  key={`${bucket.connectionId}-${bucket.name}`}
+                  bucket={bucket}
+                  onPress={() => onBucketPress(bucket)}
+                  onLongPress={() => onDeleteBucket(bucket)}
+                />
+              ))
+            )}
+          </Animated.View>
+        </NativeOnlyAnimatedView>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -388,19 +417,19 @@ export default function BucketIndexScreen() {
   // Show skeleton while store is still loading from SecureStore
   if (isInitializing) {
     return (
-      <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+      <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
           <Icon as={DatabaseIcon} className="text-foreground size-6" />
           <Text className="text-foreground text-xl font-bold">{t('buckets.title')}</Text>
         </View>
         <Separator />
         <BucketListSkeleton />
-      </View>
+      </ScreenTransitionView>
     );
   }
   if (!hasAnyConnection && !canShowCached) {
     return (
-      <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+      <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
           <Icon as={DatabaseIcon} className="text-foreground size-6" />
           <Text className="text-foreground text-xl font-bold">{t('buckets.title')}</Text>
@@ -411,7 +440,7 @@ export default function BucketIndexScreen() {
           title={t('buckets.noConnections')}
           description={t('buckets.noConnectionsDesc')}
         />
-      </View>
+      </ScreenTransitionView>
     );
   }
 
@@ -420,20 +449,20 @@ export default function BucketIndexScreen() {
   // If some connections are still connecting, show skeleton instead of 'Not Connected'
   if (connectedList.length === 0 && activeOrConnectingList.length > 0 && !canShowCached) {
     return (
-      <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+      <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
           <Icon as={DatabaseIcon} className="text-foreground size-6" />
           <Text className="text-foreground text-xl font-bold">{t('buckets.title')}</Text>
         </View>
         <Separator />
         <BucketListSkeleton />
-      </View>
+      </ScreenTransitionView>
     );
   }
 
   if (connectedList.length === 0 && !canShowCached) {
     return (
-      <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+      <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <View className="flex-row items-center gap-2.5 px-6 pt-4 pb-3">
           <Icon as={DatabaseIcon} className="text-foreground size-6" />
           <Text className="text-foreground text-xl font-bold">{t('buckets.title')}</Text>
@@ -444,14 +473,14 @@ export default function BucketIndexScreen() {
           title={t('buckets.notConnected')}
           description={t('buckets.notConnectedDesc')}
         />
-      </View>
+      </ScreenTransitionView>
     );
   }
 
   // ── Main content ───────────────────────────────────────────────────────
 
   return (
-    <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+    <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
       {/* Header */}
       <View className="px-6 pt-4 pb-3">
         <View className="flex-row items-center justify-between">
@@ -505,9 +534,10 @@ export default function BucketIndexScreen() {
               description={t('buckets.noBucketsDesc')}
             />
           ) : (
-            filteredSections.map((section) => (
+            filteredSections.map((section, index) => (
               <ProviderSectionCard
                 key={section.connection.id}
+                index={index}
                 section={section}
                 collapsed={collapsedIds === 'all' || collapsedIds.has(section.connection.id)}
                 onToggle={() => toggleCollapse(section.connection.id)}
@@ -595,6 +625,6 @@ export default function BucketIndexScreen() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </View>
+    </ScreenTransitionView>
   );
 }

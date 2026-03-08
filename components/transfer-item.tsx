@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
+import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
 import { Text } from '@/components/ui/text';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -25,6 +26,7 @@ import { View, Image } from 'react-native';
 import { getFileExtension } from '@/lib/constants';
 import { t } from '@/lib/i18n';
 import type { LucideIcon } from 'lucide-react-native';
+import { FadeInDown, FadeOutUp, ReduceMotion } from 'react-native-reanimated';
 
 type FileTypeInfo = { icon: LucideIcon; color: string };
 
@@ -137,95 +139,99 @@ export const TransferItem = React.memo(function TransferItem({
   }, [task, isCompleted, isFailed, isPaused]);
 
   return (
-    <Card className="gap-0 py-4">
-      <CardContent className="gap-3 px-4">
-        {/* Header row */}
-        <View className="flex-row items-center gap-3">
-          {hasThumbnail ? (
-            <Image
-              source={{ uri: task.localPath }}
-              className="size-10 rounded-md"
-              resizeMode="cover"
-            />
-          ) : (
-            <Icon as={fileTypeInfo.icon} className={`${fileTypeInfo.color} size-6`} />
-          )}
-          <View className="flex-1">
-            <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
-              {task.fileName}
-            </Text>
-            <Text className="text-muted-foreground text-xs">{progressText}</Text>
+    <NativeOnlyAnimatedView
+      entering={FadeInDown.duration(180).reduceMotion(ReduceMotion.System)}
+      exiting={FadeOutUp.duration(140).reduceMotion(ReduceMotion.System)}>
+      <Card className="gap-0 py-4">
+        <CardContent className="gap-3 px-4">
+          {/* Header row */}
+          <View className="flex-row items-center gap-3">
+            {hasThumbnail ? (
+              <Image
+                source={{ uri: task.localPath }}
+                className="size-10 rounded-md"
+                resizeMode="cover"
+              />
+            ) : (
+              <Icon as={fileTypeInfo.icon} className={`${fileTypeInfo.color} size-6`} />
+            )}
+            <View className="flex-1">
+              <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
+                {task.fileName}
+              </Text>
+              <Text className="text-muted-foreground text-xs">{progressText}</Text>
+            </View>
+            {isCompleted && (
+              <View className="flex-row items-center gap-1">
+                <Icon as={CheckCircleIcon} className="size-4 text-green-500" />
+              </View>
+            )}
+            {isPaused && (
+              <Text className="rounded bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300">
+                {t('transfers.paused')}
+              </Text>
+            )}
+            {!isCompleted && !isFailed && (
+              <Text className="text-foreground text-sm font-semibold">{task.progress}%</Text>
+            )}
           </View>
-          {isCompleted && (
-            <View className="flex-row items-center gap-1">
-              <Icon as={CheckCircleIcon} className="size-4 text-green-500" />
+
+          {/* Progress bar */}
+          {!isCompleted && !isFailed && (
+            <Progress
+              value={task.progress}
+              className="h-1.5"
+              indicatorClassName={getProgressColor(task.status)}
+            />
+          )}
+
+          {/* Action buttons */}
+          {(isActive || isPaused) && (
+            <View className="flex-row items-center justify-end gap-2">
+              {isActive && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onPress={onPause}
+                  className="flex-row items-center gap-1.5">
+                  <Icon as={PauseIcon} className="text-foreground size-3.5" />
+                  <Text>{t('transfers.pause')}</Text>
+                </Button>
+              )}
+              {isPaused && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onPress={onResume}
+                  className="flex-row items-center gap-1.5">
+                  <Icon as={PlayIcon} className="text-foreground size-3.5" />
+                  <Text>{t('transfers.resume')}</Text>
+                </Button>
+              )}
+              {isActive && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onPress={onCancel}
+                  className="flex-row items-center gap-1.5">
+                  <Icon as={XIcon} className="text-destructive size-3.5" />
+                  <Text className="text-destructive">{t('cancel')}</Text>
+                </Button>
+              )}
+              {isPaused && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onPress={onRemove}
+                  className="flex-row items-center gap-1.5">
+                  <Icon as={Trash2Icon} className="text-destructive size-3.5" />
+                  <Text className="text-destructive">{t('transfers.remove')}</Text>
+                </Button>
+              )}
             </View>
           )}
-          {isPaused && (
-            <Text className="rounded bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300">
-              {t('transfers.paused')}
-            </Text>
-          )}
-          {!isCompleted && !isFailed && (
-            <Text className="text-foreground text-sm font-semibold">{task.progress}%</Text>
-          )}
-        </View>
-
-        {/* Progress bar */}
-        {!isCompleted && !isFailed && (
-          <Progress
-            value={task.progress}
-            className="h-1.5"
-            indicatorClassName={getProgressColor(task.status)}
-          />
-        )}
-
-        {/* Action buttons */}
-        {(isActive || isPaused) && (
-          <View className="flex-row items-center justify-end gap-2">
-            {isActive && (
-              <Button
-                variant="outline"
-                size="sm"
-                onPress={onPause}
-                className="flex-row items-center gap-1.5">
-                <Icon as={PauseIcon} className="text-foreground size-3.5" />
-                <Text>{t('transfers.pause')}</Text>
-              </Button>
-            )}
-            {isPaused && (
-              <Button
-                variant="outline"
-                size="sm"
-                onPress={onResume}
-                className="flex-row items-center gap-1.5">
-                <Icon as={PlayIcon} className="text-foreground size-3.5" />
-                <Text>{t('transfers.resume')}</Text>
-              </Button>
-            )}
-            {isActive && (
-              <Button
-                variant="outline"
-                size="sm"
-                onPress={onCancel}
-                className="flex-row items-center gap-1.5">
-                <Icon as={XIcon} className="text-destructive size-3.5" />
-                <Text className="text-destructive">{t('cancel')}</Text>
-              </Button>
-            )}
-            {isPaused && (
-              <Button
-                variant="outline"
-                size="sm"
-                onPress={onRemove}
-                className="flex-row items-center gap-1.5">
-                <Icon as={Trash2Icon} className="text-destructive size-3.5" />
-                <Text className="text-destructive">{t('transfers.remove')}</Text>
-              </Button>
-            )}
-          </View>
-        )}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </NativeOnlyAnimatedView>
   );
 });
