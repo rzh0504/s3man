@@ -11,14 +11,12 @@ import type { BucketInfo, TransferTask } from '@/lib/types';
 import {
   UploadCloudIcon,
   XIcon,
-  ChevronRightIcon,
   FolderIcon,
   FileIcon,
   ImageIcon,
   FileVideoIcon,
   CheckCircle2Icon,
   AlertCircleIcon,
-  Loader2Icon,
 } from 'lucide-react-native';
 import * as React from 'react';
 import { View, ScrollView, Pressable, ActivityIndicator, Alert } from 'react-native';
@@ -38,6 +36,43 @@ function getFileName(uri: string): string {
   const decoded = decodeURIComponent(uri);
   const segments = decoded.split('/');
   return segments[segments.length - 1] || 'shared-file';
+}
+
+function hasUriScheme(uri: string): boolean {
+  return /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(uri);
+}
+
+function normalizeLocalUri(uri: string): string {
+  if (!uri) return uri;
+  return hasUriScheme(uri) ? uri : `file://${uri}`;
+}
+
+function sanitizeFileName(name: string): string {
+  const trimmed = name.trim();
+  const safe = trimmed.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-');
+  return safe || 'shared-file';
+}
+
+function getExtensionForMimeType(mimeType?: string): string | null {
+  const map: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/heic': 'heic',
+    'image/heif': 'heif',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/webm': 'webm',
+    'application/pdf': 'pdf',
+  };
+  return mimeType ? map[mimeType] ?? null : null;
+}
+
+function ensureFileNameExtension(name: string, mimeType?: string): string {
+  if (name.includes('.')) return name;
+  const ext = getExtensionForMimeType(mimeType);
+  return ext ? `${name}.${ext}` : name;
 }
 
 function getContentIcon(type?: string) {
@@ -70,6 +105,11 @@ interface FileUploadState {
   error?: string;
 }
 
+interface UploadSummary {
+  success: number;
+  failed: number;
+}
+
 // ── Screen ─────────────────────────────────────────────────────────────────
 
 export default function HandleShareScreen() {
@@ -94,6 +134,92 @@ export default function HandleShareScreen() {
   const [fileStates, setFileStates] = React.useState<FileUploadState[]>([]);
   const [isUploading, setIsUploading] = React.useState(false);
   const [uploadDone, setUploadDone] = React.useState(false);
+  const [uploadSummary, setUploadSummary] = React.useState<UploadSummary | null>(null);
+
+  const getReadableUploadError = React.useCallback(
+    (error: unknown) => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : t('share.uploadFailed');
+
+      if (/doesn't exist|no such file|enoent|failed to copy/i.test(message)) {
+        return t('share.prepareFailed');
+      }
+
+      return message || t('share.uploadFailed');
+    },
+    [t]
+  );
+
+  const syncPreparedFile = React.useCallback((index: number, file: SharedFile) => {
+    setSharedFiles((prev) => {
+      if (!prev[index]) return prev;
+      const next = [...prev];
+      next[index] = file;
+      return next;
+    });
+
+    setFileStates((prev) => {
+      if (!prev[index]) return prev;
+      const next = [...prev];
+      next[index] = { ...next[index], file };
+      return next;
+    });
+  }, []);
+
+  const resolveSharedFileForUpload = React.useCallback(
+    async (file: SharedFile, index: number): Promise<SharedFile> => {
+      const directCandidates = Array.from(
+        new Set([file.uri, normalizeLocalUri(file.uri)].filter(Boolean))
+      );
+
+      for (const candidate of directCandidates) {
+        try {
+          const info = await FileSystem.getInfoAsync(candidate);
+          if (info.exists && candidate.startsWith('file://')) {
+            return {
+              ...file,
+              uri: candidate,
+              size: 'size' in info ? info.size : file.size,
+            };
+          }
+        } catch {
+          // Try the next candidate or fallback copy.
+        }
+      }
+
+      if (!FileSystem.cacheDirectory) {
+        throw new Error(t('share.prepareFailed'));
+      }
+
+      const cacheDir = `${FileSystem.cacheDirectory}shared-uploads/`;
+      await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+
+      const fileName = ensureFileNameExtension(sanitizeFileName(file.name), file.mimeType);
+      const cacheUri = `${cacheDir}${Date.now()}-${index}-${fileName}`;
+      let copyError: unknown;
+
+      for (const candidate of directCandidates) {
+        try {
+          await FileSystem.copyAsync({ from: candidate, to: cacheUri });
+          const copiedInfo = await FileSystem.getInfoAsync(cacheUri);
+          return {
+            ...file,
+            uri: cacheUri,
+            size: copiedInfo.exists && 'size' in copiedInfo ? copiedInfo.size : file.size,
+          };
+        } catch (error) {
+          copyError = error;
+        }
+      }
+
+      throw copyError ?? new Error(t('share.prepareFailed'));
+    },
+    [t]
+  );
 
   // ── Load shared payloads ─────────────────────────────────────────────
   React.useEffect(() => {
@@ -143,7 +269,7 @@ export default function HandleShareScreen() {
   React.useEffect(() => {
     sharedFiles.forEach((f, i) => {
       if (f.size != null) return;
-      FileSystem.getInfoAsync(f.uri)
+      FileSystem.getInfoAsync(normalizeLocalUri(f.uri))
         .then((info) => {
           if (info.exists && 'size' in info) {
             setSharedFiles((prev) => {
@@ -161,38 +287,46 @@ export default function HandleShareScreen() {
   const handleUpload = React.useCallback(async () => {
     if (!selectedConnectionId || !selectedBucket || sharedFiles.length === 0) return;
     setIsUploading(true);
+    setUploadDone(false);
+    setUploadSummary(null);
 
     const results = [...fileStates];
+    let successCount = 0;
+    let failedCount = 0;
 
     for (let i = 0; i < sharedFiles.length; i++) {
-      const file = sharedFiles[i];
-      const key = file.name;
-      const mimeType = file.mimeType || S3Service.guessMimeType(file.name);
-      const fileSize = file.size ?? 0;
-
       // Update state to uploading
-      results[i] = { ...results[i], status: 'uploading', progress: 5 };
+      results[i] = { ...results[i], status: 'uploading', progress: 3, error: undefined };
       setFileStates([...results]);
 
-      // Add transfer task for monitoring
-      const taskId = generateId();
-      const task: TransferTask = {
-        id: taskId,
-        fileName: file.name,
-        type: 'upload',
-        status: 'active',
-        progress: 0,
-        totalBytes: fileSize,
-        transferredBytes: 0,
-        bucket: selectedBucket,
-        key,
-        connectionId: selectedConnectionId,
-        localPath: file.uri,
-        startedAt: new Date().toISOString(),
-      };
-      addTask(task);
+      let progressTimer: ReturnType<typeof setInterval> | null = null;
+      let taskId: string | null = null;
 
       try {
+        const preparedFile = await resolveSharedFileForUpload(sharedFiles[i], i);
+        syncPreparedFile(i, preparedFile);
+
+        const key = preparedFile.name;
+        const mimeType = preparedFile.mimeType || S3Service.guessMimeType(preparedFile.name);
+        const fileSize = preparedFile.size ?? 0;
+
+        taskId = generateId();
+        const task: TransferTask = {
+          id: taskId,
+          fileName: preparedFile.name,
+          type: 'upload',
+          status: 'active',
+          progress: 0,
+          totalBytes: fileSize,
+          transferredBytes: 0,
+          bucket: selectedBucket,
+          key,
+          connectionId: selectedConnectionId,
+          localPath: preparedFile.uri,
+          startedAt: new Date().toISOString(),
+        };
+        addTask(task);
+
         const presignedUrl = await S3Service.getPresignedUploadUrl(
           selectedConnectionId,
           selectedBucket,
@@ -207,47 +341,69 @@ export default function HandleShareScreen() {
         let currentProgress = 15;
         const increment = fileSize > 10_000_000 ? 1.5 : fileSize > 1_000_000 ? 4 : 10;
         const interval = fileSize > 10_000_000 ? 800 : 500;
-        const progressTimer = setInterval(() => {
+        progressTimer = setInterval(() => {
           if (currentProgress < 90) {
             currentProgress = Math.min(90, currentProgress + increment);
             results[i] = { ...results[i], progress: Math.round(currentProgress) };
             setFileStates([...results]);
-            updateTask(taskId, {
+            updateTask(task.id, {
               progress: Math.round(currentProgress),
               transferredBytes: Math.round((currentProgress / 100) * fileSize),
             });
           }
         }, interval);
 
-        await FileSystem.uploadAsync(presignedUrl, file.uri, {
+        await FileSystem.uploadAsync(presignedUrl, preparedFile.uri, {
           httpMethod: 'PUT',
           uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
           headers: { 'Content-Type': mimeType },
         });
 
-        clearInterval(progressTimer);
         results[i] = { ...results[i], status: 'done', progress: 100 };
         setFileStates([...results]);
-        updateTask(taskId, {
+        updateTask(task.id, {
           progress: 100,
           transferredBytes: fileSize,
           status: 'completed',
           completedAt: new Date().toISOString(),
         });
+        successCount += 1;
       } catch (error: any) {
         console.error('Share upload error:', error);
-        results[i] = { ...results[i], status: 'error', error: error.message || 'Upload failed' };
+        const errorMessage = getReadableUploadError(error);
+        results[i] = { ...results[i], status: 'error', error: errorMessage };
         setFileStates([...results]);
-        updateTask(taskId, {
-          status: 'failed',
-          error: error.message || 'Upload failed',
-        });
+        if (taskId) {
+          updateTask(taskId, {
+            status: 'failed',
+            error: errorMessage,
+          });
+        }
+        failedCount += 1;
+      } finally {
+        if (progressTimer) {
+          clearInterval(progressTimer);
+        }
       }
     }
 
     setIsUploading(false);
     setUploadDone(true);
-  }, [selectedConnectionId, selectedBucket, sharedFiles, fileStates, addTask, updateTask]);
+    setUploadSummary({
+      success: successCount,
+      failed: failedCount,
+    });
+  }, [
+    selectedConnectionId,
+    selectedBucket,
+    sharedFiles,
+    fileStates,
+    addTask,
+    updateTask,
+    getReadableUploadError,
+    resolveSharedFileForUpload,
+    syncPreparedFile,
+  ]);
 
   const handleClose = () => {
     if (router.canGoBack()) {
@@ -257,7 +413,7 @@ export default function HandleShareScreen() {
     }
   };
 
-  const selectedConnection = connectedConns.find((c) => c.id === selectedConnectionId);
+  const hasUploadFailures = (uploadSummary?.failed ?? 0) > 0;
 
   // ── Render ──────────────────────────────────────────────────────────────
 
@@ -323,6 +479,11 @@ export default function HandleShareScreen() {
                     {file.size != null && (
                       <Text className="text-muted-foreground text-xs">
                         {formatBytes(file.size)}
+                      </Text>
+                    )}
+                    {state?.status === 'error' && !!state.error && (
+                      <Text className="mt-1 text-xs text-red-500" numberOfLines={3}>
+                        {state.error}
                       </Text>
                     )}
                   </View>
@@ -428,10 +589,38 @@ export default function HandleShareScreen() {
         <View
           className="border-border border-t px-4 py-3"
           style={{ paddingBottom: Math.max(insets.bottom, 12) }}>
+          {uploadSummary && (
+            <View
+              className={`mb-3 rounded-lg border px-3 py-2 ${
+                hasUploadFailures
+                  ? 'border-red-500/30 bg-red-500/10'
+                  : 'border-green-500/30 bg-green-500/10'
+              }`}>
+              <Text
+                className={`text-sm ${
+                  hasUploadFailures ? 'text-red-600' : 'text-green-600'
+                }`}>
+                {uploadSummary.failed === 0
+                  ? t('share.uploadSuccessSummary', { count: uploadSummary.success })
+                  : uploadSummary.success > 0
+                    ? t('share.uploadPartialSummary', {
+                        success: uploadSummary.success,
+                        failed: uploadSummary.failed,
+                      })
+                    : t('share.uploadAllFailedSummary', { count: uploadSummary.failed })}
+              </Text>
+            </View>
+          )}
+
           {uploadDone ? (
             <Button onPress={handleClose} className="flex-row items-center justify-center gap-2">
-              <Icon as={CheckCircle2Icon} className="text-primary-foreground size-5" />
-              <Text className="text-primary-foreground font-semibold">{t('share.done')}</Text>
+              <Icon
+                as={hasUploadFailures ? AlertCircleIcon : CheckCircle2Icon}
+                className="text-primary-foreground size-5"
+              />
+              <Text className="text-primary-foreground font-semibold">
+                {hasUploadFailures ? t('share.goBack') : t('share.done')}
+              </Text>
             </Button>
           ) : (
             <Button
