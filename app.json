@@ -12,10 +12,20 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.richardbez.s3man"
+      "bundleIdentifier": "com.richardbez.s3man",
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.richardbez.s3man"
+        ]
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -44,8 +54,12 @@
           },
           "android": {
             "enabled": true,
-            "singleShareMimeTypes": ["*/*"],
-            "multipleShareMimeTypes": ["*/*"]
+            "singleShareMimeTypes": [
+              "*/*"
+            ],
+            "multipleShareMimeTypes": [
+              "*/*"
+            ]
           }
         }
       ],
