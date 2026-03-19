@@ -20,6 +20,7 @@ import { ObjectItem } from '@/components/object-item';
 import { Breadcrumb } from '@/components/breadcrumb';
 import { EmptyState } from '@/components/empty-state';
 import { FilePreview } from '@/components/file-preview';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { useObjectStore } from '@/lib/stores/object-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
 import * as S3Service from '@/lib/s3-service';
@@ -790,6 +791,7 @@ export default function ObjectBrowserScreen() {
         <Text className="text-foreground flex-1 text-lg font-semibold" numberOfLines={1}>
           {bucketName}
         </Text>
+        {!selectionMode && selectedCount === 0 && <InfoTooltip text={t('bucket.longPressHint')} />}
         <Badge variant="secondary">
           <Text className="text-xs">{t('bucket.files', { count: fileCount })}</Text>
         </Badge>
@@ -922,20 +924,6 @@ export default function ObjectBrowserScreen() {
                 </Button>
               </View>
             </View>
-          </View>
-        </NativeOnlyAnimatedView>
-      )}
-
-      {/* Long-press hint — fixed at bottom */}
-      {!selectionMode && selectedCount === 0 && (
-        <NativeOnlyAnimatedView
-          entering={FadeInDown.duration(180).delay(80).reduceMotion(ReduceMotion.System)}
-          exiting={FadeOutDown.duration(120).reduceMotion(ReduceMotion.System)}>
-          <View
-            className="absolute right-0 bottom-0 left-0 items-center"
-            style={{ paddingBottom: Math.max(insets.bottom, 8) }}
-            pointerEvents="none">
-            <Text className="text-muted-foreground/60 text-xs">{t('bucket.longPressHint')}</Text>
           </View>
         </NativeOnlyAnimatedView>
       )}

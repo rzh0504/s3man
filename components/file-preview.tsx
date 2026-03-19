@@ -1,6 +1,7 @@
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Button } from '@/components/ui/button';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { formatBytes } from '@/lib/constants';
 import { isImageFile, isVideoFile, isCodeFile, isPdfFile } from '@/lib/s3-service';
 import type { S3Object } from '@/lib/types';
@@ -244,10 +245,10 @@ export function FilePreview({
               <VideoPreview url={previewUrl} />
             ) : isPdf && previewUrl ? (
               <View className="items-center gap-3 p-8">
-                <Icon as={ExternalLinkIcon} className="text-muted-foreground size-12" />
-                <Text className="text-muted-foreground text-center text-sm">
-                  {t('preview.pdfHint')}
-                </Text>
+                <View className="flex-row items-center gap-2">
+                  <Icon as={ExternalLinkIcon} className="text-muted-foreground size-12" />
+                  <InfoTooltip text={t('preview.pdfHint')} iconClassName="size-5" />
+                </View>
                 <Button
                   onPress={() => Linking.openURL(previewUrl)}
                   className="mt-2 flex-row items-center gap-2">

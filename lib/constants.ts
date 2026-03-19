@@ -94,9 +94,9 @@ const CUSTOM_S3: ProviderInfo = {
   label: 'Custom',
   description: 'MinIO, Wasabi, DigitalOcean Spaces, etc.',
   defaultEndpoint: '',
-  defaultRegion: 'us-east-1',
+  defaultRegion: '',
   supportsBucketLocation: false,
-  regions: [{ label: 'Default', value: 'us-east-1' }],
+  regions: [],
 };
 
 // ─── Provider registry ───────────────────────────────────────────────────────
@@ -118,13 +118,14 @@ export function buildEndpointUrl(
   region: string,
   accountId?: string
 ): string {
+  const resolvedRegion = normalizeRegion(provider, region);
   switch (provider) {
     case 'cloudflare-r2':
       return accountId ? `https://${accountId}.r2.cloudflarestorage.com` : '';
     case 'backblaze-b2':
-      return `https://s3.${region}.backblazeb2.com`;
+      return `https://s3.${resolvedRegion}.backblazeb2.com`;
     case 'aws-s3':
-      return `https://s3.${region}.amazonaws.com`;
+      return `https://s3.${resolvedRegion}.amazonaws.com`;
     default:
       return '';
   }
@@ -161,6 +162,19 @@ export function getFileExtension(name: string): string {
   return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
 }
 
+export function normalizeRegion(provider: S3Provider, region?: string): string {
+  const value = region?.trim() ?? '';
+
+  switch (provider) {
+    case 'cloudflare-r2':
+      return value || 'auto';
+    case 'custom':
+      return value || 'default';
+    default:
+      return value || getProvider(provider).defaultRegion;
+  }
+}
+
 export function getRegionLabel(regionValue: string, provider?: S3Provider): string {
   if (!provider) {
     // Search all providers
@@ -171,6 +185,9 @@ export function getRegionLabel(regionValue: string, provider?: S3Provider): stri
     return regionValue;
   }
   const prov = getProvider(provider);
+  if (!regionValue.trim()) {
+    return provider === 'custom' ? 'default' : prov.defaultRegion;
+  }
   const region = prov.regions.find((r) => r.value === regionValue);
   return region ? region.label : regionValue;
 }

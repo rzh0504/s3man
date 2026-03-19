@@ -18,6 +18,7 @@ import { ScreenTransitionView } from '@/components/ui/screen-transition-view';
 import { Separator } from '@/components/ui/separator';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { useConnectionStore } from '@/lib/stores/connection-store';
 import * as S3Service from '@/lib/s3-service';
 import { PROVIDERS, getProvider, getRegionLabel, buildEndpointUrl } from '@/lib/constants';
@@ -58,7 +59,13 @@ import * as DocumentPicker from 'expo-document-picker';
 
 import { useRouter } from 'expo-router';
 import { useT } from '@/lib/i18n';
-import Animated, { FadeInDown, FadeOutUp, ReduceMotion } from 'react-native-reanimated';
+import Animated, {
+  FadeInDown,
+  FadeInRight,
+  FadeOutUp,
+  FadeOutRight,
+  ReduceMotion,
+} from 'react-native-reanimated';
 
 const DEFAULT_CONFIG: S3Config = {
   provider: 'cloudflare-r2',
@@ -68,6 +75,29 @@ const DEFAULT_CONFIG: S3Config = {
   region: 'auto',
   accountId: '',
 };
+
+function joinTooltipText(...parts: Array<string | null | undefined | false>): string | undefined {
+  const value = parts.filter(Boolean).join('\n\n').trim();
+  return value || undefined;
+}
+
+function FieldLabel({
+  label,
+  tooltip,
+  meta,
+}: {
+  label: string;
+  tooltip?: string;
+  meta?: string;
+}) {
+  return (
+    <View className="flex-row flex-wrap items-center gap-1.5">
+      <Label>{label}</Label>
+      {meta ? <Text className="text-muted-foreground text-xs">{meta}</Text> : null}
+      {tooltip ? <InfoTooltip text={tooltip} /> : null}
+    </View>
+  );
+}
 
 // ── Connection Card ──────────────────────────────────────────────────────
 
@@ -106,12 +136,7 @@ function ConnectionCard({
           : t('conn.statusOffline');
 
   return (
-    <Animated.View
-      entering={FadeInDown.duration(200)
-        .delay(Math.min(index * 40, 160))
-        .reduceMotion(ReduceMotion.System)}
-      exiting={FadeOutUp.duration(140).reduceMotion(ReduceMotion.System)}
-      className="border-border bg-card rounded-xl border p-4">
+    <View className="border-border bg-card rounded-xl border p-4">
       <View className="flex-row items-center gap-3">
         <ProviderIcon provider={conn.config.provider} size={28} />
         <View className="flex-1">
@@ -119,7 +144,7 @@ function ConnectionCard({
             {conn.displayName}
           </Text>
           <Text className="text-muted-foreground text-xs" numberOfLines={1}>
-            {providerInfo.label} · {conn.config.region}
+            {providerInfo.label} · {getRegionLabel(conn.config.region, conn.config.provider)}
           </Text>
         </View>
         <View className="flex-row items-center gap-1.5">
@@ -178,7 +203,7 @@ function ConnectionCard({
           <Icon as={TrashIcon} className="text-destructive size-3.5" />
         </Pressable>
       </View>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -338,6 +363,7 @@ export default function ConnectionsScreen() {
     // Auto-fill display name if empty
     setDisplayName((prev) => (prev ? prev : p.label));
     setShowProviderPicker(false);
+    setShowRegionPicker(false);
     // Reset bucket discovery
     setDiscoveredBuckets([]);
     setSelectedBuckets(new Set());
@@ -552,11 +578,15 @@ export default function ConnectionsScreen() {
         className="bg-background flex-1"
         style={{ paddingTop: insets.top }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScreenTransitionView className="flex-1">
-          <ScrollView
-            className="flex-1"
-            contentContainerClassName="p-6 pb-12"
-            keyboardShouldPersistTaps="handled">
+        <Animated.View
+          className="flex-1"
+          entering={FadeInRight.duration(220).reduceMotion(ReduceMotion.System)}
+          exiting={FadeOutRight.duration(140).reduceMotion(ReduceMotion.System)}>
+          <ScreenTransitionView className="flex-1" disabled>
+            <ScrollView
+              className="flex-1"
+              contentContainerClassName="p-6 pb-12"
+              keyboardShouldPersistTaps="handled">
             {/* Form Header */}
             <View className="mb-4 flex-row items-center gap-2.5">
               <Pressable onPress={handleCancel} className="rounded-md p-1">
@@ -587,7 +617,7 @@ export default function ConnectionsScreen() {
 
           {/* Provider */}
           <View className="mb-4 gap-2">
-            <Label>{t('form.provider')}</Label>
+            <FieldLabel label={t('form.provider')} />
             <Pressable
               onPress={() => setShowProviderPicker(!showProviderPicker)}
               className="border-input bg-background dark:bg-input/30 flex-row items-center justify-between rounded-md border px-3 py-2.5">
@@ -633,7 +663,7 @@ export default function ConnectionsScreen() {
           {/* Account ID (R2) */}
           {provider.needsAccountId && (
             <View className="mb-4 gap-2">
-              <Label>{t('form.accountId')}</Label>
+              <FieldLabel label={t('form.accountId')} tooltip={t('form.accountIdHelp')} />
               <Input
                 placeholder="e.g. a1b2c3d4e5f6..."
                 value={formConfig.accountId ?? ''}
@@ -641,20 +671,24 @@ export default function ConnectionsScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              <Text className="text-muted-foreground text-xs">{t('form.accountIdHelp')}</Text>
             </View>
           )}
 
           {/* Endpoint URL */}
           <View className="mb-4 gap-2">
-            <Label>
-              Endpoint URL{' '}
-              {formConfig.provider !== 'custom' && (
-                <Text className="text-muted-foreground text-xs">
-                  {t('form.endpointAutoOverride')}
-                </Text>
-              )}
-            </Label>
+            <FieldLabel
+              label="Endpoint URL"
+              tooltip={
+                formConfig.provider !== 'custom'
+                  ? joinTooltipText(
+                      t('form.endpointAutoOverride'),
+                      effectiveEndpoint && !formConfig.endpointUrl
+                        ? t('form.willUse', { url: effectiveEndpoint })
+                        : undefined
+                    )
+                  : undefined
+              }
+            />
             <View className="flex-row items-center gap-0">
               <View className="bg-muted border-input rounded-l-md border border-r-0 px-3 py-2">
                 <Text className="text-muted-foreground text-sm">https://</Text>
@@ -681,16 +715,14 @@ export default function ConnectionsScreen() {
                 autoCorrect={false}
               />
             </View>
-            {effectiveEndpoint && !formConfig.endpointUrl ? (
-              <Text className="text-muted-foreground text-xs">
-                {t('form.willUse', { url: effectiveEndpoint })}
-              </Text>
-            ) : null}
           </View>
 
           {/* Access Key ID */}
           <View className="mb-4 gap-2">
-            <Label>Access Key ID</Label>
+            <FieldLabel
+              label="Access Key ID"
+              tooltip={formConfig.provider === 'backblaze-b2' ? t('form.b2KeyIdHelp') : undefined}
+            />
             <Input
               placeholder={
                 formConfig.provider === 'cloudflare-r2'
@@ -704,14 +736,14 @@ export default function ConnectionsScreen() {
               autoCapitalize="none"
               autoCorrect={false}
             />
-            {formConfig.provider === 'backblaze-b2' && (
-              <Text className="text-muted-foreground text-xs">{t('form.b2KeyIdHelp')}</Text>
-            )}
           </View>
 
           {/* Secret Access Key */}
           <View className="mb-4 gap-2">
-            <Label>{t('form.secretAccessKey')}</Label>
+            <FieldLabel
+              label={t('form.secretAccessKey')}
+              tooltip={formConfig.provider === 'backblaze-b2' ? t('form.b2SecretHelp') : undefined}
+            />
             <View className="flex-row items-center gap-0">
               <Input
                 className="flex-1 rounded-r-none"
@@ -735,48 +767,62 @@ export default function ConnectionsScreen() {
                 />
               </Pressable>
             </View>
-            {formConfig.provider === 'backblaze-b2' && (
-              <Text className="text-muted-foreground text-xs">{t('form.b2SecretHelp')}</Text>
-            )}
           </View>
 
           {/* Region */}
           <View className="mb-6 gap-2">
-            <Label>{t('form.region')}</Label>
-            <Pressable
-              onPress={() => setShowRegionPicker(!showRegionPicker)}
-              className="border-input bg-background dark:bg-input/30 flex-row items-center justify-between rounded-md border px-3 py-2.5">
-              <Text className="text-foreground">
-                {getRegionLabel(formConfig.region, formConfig.provider)}
-              </Text>
-              <Icon as={ChevronDownIcon} className="text-muted-foreground size-4" />
-            </Pressable>
+            <FieldLabel
+              label={t('form.region')}
+              tooltip={formConfig.provider === 'custom' ? t('form.customRegionHelp') : undefined}
+            />
+            {formConfig.provider === 'custom' ? (
+              <>
+                <Input
+                  placeholder={t('form.customRegionPlaceholder')}
+                  value={formConfig.region}
+                  onChangeText={(text) => setFormConfig((p) => ({ ...p, region: text }))}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </>
+            ) : (
+              <>
+                <Pressable
+                  onPress={() => setShowRegionPicker(!showRegionPicker)}
+                  className="border-input bg-background dark:bg-input/30 flex-row items-center justify-between rounded-md border px-3 py-2.5">
+                  <Text className="text-foreground">
+                    {getRegionLabel(formConfig.region, formConfig.provider)}
+                  </Text>
+                  <Icon as={ChevronDownIcon} className="text-muted-foreground size-4" />
+                </Pressable>
 
-            {showRegionPicker && (
-              <View className="border-input bg-card mt-1 max-h-48 rounded-md border">
-                <ScrollView nestedScrollEnabled>
-                  {provider.regions.map((region) => (
-                    <Pressable
-                      key={region.value}
-                      onPress={() => {
-                        setFormConfig((p) => ({ ...p, region: region.value }));
-                        setShowRegionPicker(false);
-                      }}
-                      className={`px-3 py-2.5 ${
-                        formConfig.region === region.value ? 'bg-accent' : ''
-                      }`}>
-                      <Text
-                        className={`text-sm ${
-                          formConfig.region === region.value
-                            ? 'text-accent-foreground font-medium'
-                            : 'text-foreground'
-                        }`}>
-                        {region.label}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </View>
+                {showRegionPicker && (
+                  <View className="border-input bg-card mt-1 max-h-48 rounded-md border">
+                    <ScrollView nestedScrollEnabled>
+                      {provider.regions.map((region) => (
+                        <Pressable
+                          key={region.value}
+                          onPress={() => {
+                            setFormConfig((p) => ({ ...p, region: region.value }));
+                            setShowRegionPicker(false);
+                          }}
+                          className={`px-3 py-2.5 ${
+                            formConfig.region === region.value ? 'bg-accent' : ''
+                          }`}>
+                          <Text
+                            className={`text-sm ${
+                              formConfig.region === region.value
+                                ? 'text-accent-foreground font-medium'
+                                : 'text-foreground'
+                            }`}>
+                            {region.label}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+              </>
             )}
           </View>
 
@@ -794,19 +840,21 @@ export default function ConnectionsScreen() {
                   onPress={() =>
                     setFormConfig((p) => ({ ...p, forcePathStyle: p.forcePathStyle === false }))
                   }>
-                  <Label>{t('form.pathStyle')}</Label>
+                  <View className="flex-row items-center gap-1.5">
+                    <Label>{t('form.pathStyle')}</Label>
+                  </View>
                 </Pressable>
+                <InfoTooltip text={t('form.pathStyleHelp')} />
               </View>
-              <Text className="text-muted-foreground text-xs">{t('form.pathStyleHelp')}</Text>
             </View>
           )}
 
           {/* Proxy URL (optional) */}
           <View className="mb-4 gap-2">
-            <Label>
-              {t('form.proxyUrl')}{' '}
-              <Text className="text-muted-foreground text-xs">{t('form.optional')}</Text>
-            </Label>
+            <FieldLabel
+              label={t('form.proxyUrl')}
+              tooltip={joinTooltipText(t('form.optional'), t('form.proxyUrlHelp'))}
+            />
             <Input
               placeholder="https://files.yourdomain.com"
               value={formConfig.proxyUrl ?? ''}
@@ -814,7 +862,6 @@ export default function ConnectionsScreen() {
               autoCapitalize="none"
               autoCorrect={false}
             />
-            <Text className="text-muted-foreground text-xs">{t('form.proxyUrlHelp')}</Text>
           </View>
 
           {/* Proxy Token (shown when proxy URL is set) */}
@@ -835,10 +882,10 @@ export default function ConnectionsScreen() {
           {/* Proxy Alias (shown when proxy URL is set) */}
           {!!formConfig.proxyUrl && (
             <View className="mb-6 gap-2">
-              <Label>
-                {t('form.proxyAlias')}{' '}
-                <Text className="text-muted-foreground text-xs">{t('form.optional')}</Text>
-              </Label>
+              <FieldLabel
+                label={t('form.proxyAlias')}
+                tooltip={joinTooltipText(t('form.optional'), t('form.proxyAliasHelp'))}
+              />
               <Input
                 placeholder="b2"
                 value={formConfig.proxyAlias ?? ''}
@@ -846,14 +893,22 @@ export default function ConnectionsScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              <Text className="text-muted-foreground text-xs">{t('form.proxyAliasHelp')}</Text>
             </View>
           )}
 
           {/* Bucket Discovery */}
           <View className="mb-6 gap-3">
             <View className="flex-row items-center justify-between">
-              <Label>{t('form.discoverBuckets')}</Label>
+              <View className="flex-row items-center gap-1.5">
+                <Label>{t('form.discoverBuckets')}</Label>
+                <InfoTooltip
+                  text={
+                    formConfig.provider === 'backblaze-b2'
+                      ? t('form.discoverHelpR2')
+                      : t('form.discoverHelpGeneric')
+                  }
+                />
+              </View>
               {discoveredBuckets.length > 0 && (
                 <Text className="text-muted-foreground text-xs">
                   {t('form.selectedCount', {
@@ -863,12 +918,6 @@ export default function ConnectionsScreen() {
                 </Text>
               )}
             </View>
-
-            <Text className="text-muted-foreground -mt-1 text-xs">
-              {formConfig.provider === 'backblaze-b2'
-                ? t('form.discoverHelpR2')
-                : t('form.discoverHelpGeneric')}
-            </Text>
 
             <Button
               variant="outline"
@@ -949,8 +998,9 @@ export default function ConnectionsScreen() {
               )}
             </Button>
           </View>
-          </ScrollView>
-        </ScreenTransitionView>
+            </ScrollView>
+          </ScreenTransitionView>
+        </Animated.View>
       </KeyboardAvoidingView>
     );
   }
@@ -958,7 +1008,7 @@ export default function ConnectionsScreen() {
   // ── Connection List View ───────────────────────────────────────────────
 
   return (
-    <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+    <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }} disabled>
       {/* Page Header */}
       <View className="px-6 pt-4 pb-3">
         <View className="flex-row items-center gap-2.5">
@@ -1011,9 +1061,10 @@ export default function ConnectionsScreen() {
         <Separator className="my-6" />
 
         <View className="mb-4">
-          <Text className="text-foreground text-lg font-semibold">{t('data.title')}</Text>
-          <Text className="text-muted-foreground mt-1 text-sm">{t('data.desc')}</Text>
-          <Text className="text-muted-foreground mt-0.5 text-xs">{t('data.warning')}</Text>
+          <View className="flex-row items-center gap-1.5">
+            <Text className="text-foreground text-lg font-semibold">{t('data.title')}</Text>
+            <InfoTooltip text={joinTooltipText(t('data.desc'), t('data.warning'))} />
+          </View>
         </View>
 
         {/* Import result banner */}

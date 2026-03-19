@@ -1,0 +1,101 @@
+name: Build and Release on Tag
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Android APK on EAS
+        run: eas build --platform android --profile preview --non-interactive --wait --json > build.json
+
+      - name: Read build metadata
+        id: build_meta
+        shell: bash
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const raw = fs.readFileSync('build.json', 'utf8').trim();
+          const payload = JSON.parse(raw);
+          const build = Array.isArray(payload) ? payload[0] : payload;
+          if (!build?.id) {
+            throw new Error('Unable to read build ID from build.json');
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `build_id=${build.id}\n`);
+          EOF
+
+      - name: Fetch build details
+        run: eas build:view ${{ steps.build_meta.outputs.build_id }} --json > build-view.json
+
+      - name: Download APK
+        id: artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+
+          node <<'EOF'
+          const fs = require('fs');
+          const path = require('path');
+
+          const raw = fs.readFileSync('build-view.json', 'utf8').trim();
+          const build = JSON.parse(raw);
+          const artifactUrl =
+            build?.artifacts?.applicationArchiveUrl ||
+            build?.artifacts?.buildUrl ||
+            build?.applicationArchiveUrl ||
+            build?.buildArtifactUrl;
+
+          if (!artifactUrl) {
+            throw new Error('Unable to find APK download URL in build-view.json');
+          }
+
+          const tag = process.env.GITHUB_REF_NAME;
+          const fileName = `s3man-${tag}.apk`;
+
+          fs.appendFileSync(process.env.GITHUB_ENV, `ARTIFACT_URL=${artifactUrl}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `ARTIFACT_PATH=${path.posix.join('dist', fileName)}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `path=${path.posix.join('dist', fileName)}\n`);
+          EOF
+
+          curl -L "$ARTIFACT_URL" -o "$ARTIFACT_PATH"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: ${{ steps.artifact.outputs.path }}

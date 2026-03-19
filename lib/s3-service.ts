@@ -14,7 +14,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { S3Config, BucketInfo, S3Object } from '@/lib/types';
-import { getProvider, buildEndpointUrl } from '@/lib/constants';
+import { getProvider, buildEndpointUrl, normalizeRegion } from '@/lib/constants';
 import {
   objectListCache,
   presignedUrlCache,
@@ -46,6 +46,10 @@ function resolveEndpoint(config: S3Config): string {
   return buildEndpointUrl(config.provider, config.region, config.accountId);
 }
 
+function resolveRegion(config: S3Config): string {
+  return normalizeRegion(config.provider, config.region);
+}
+
 /** Create and register an S3 client for a given connection ID */
 export function createClientForConnection(connectionId: string, config: S3Config): S3Client {
   // Destroy existing client for this ID if any
@@ -54,7 +58,7 @@ export function createClientForConnection(connectionId: string, config: S3Config
   const endpoint = resolveEndpoint(config);
 
   const clientConfig: S3ClientConfig = {
-    region: config.provider === 'cloudflare-r2' ? 'auto' : config.region || 'us-east-1',
+    region: resolveRegion(config),
     credentials: {
       accessKeyId: sanitize(config.accessKeyId),
       secretAccessKey: sanitize(config.secretAccessKey),
@@ -101,7 +105,7 @@ export function destroyAllClients(): void {
 export async function discoverBuckets(config: S3Config): Promise<string[]> {
   const endpoint = resolveEndpoint(config);
   const clientConfig: S3ClientConfig = {
-    region: config.provider === 'cloudflare-r2' ? 'auto' : config.region || 'us-east-1',
+    region: resolveRegion(config),
     credentials: {
       accessKeyId: sanitize(config.accessKeyId),
       secretAccessKey: sanitize(config.secretAccessKey),
@@ -150,7 +154,7 @@ export async function listBuckets(connectionId: string): Promise<BucketInfo[]> {
           region = undefined;
         }
       } else {
-        region = config.region;
+        region = resolveRegion(config);
       }
 
       buckets.push({
@@ -404,7 +408,7 @@ export async function getPresignedUploadUrl(
 function buildProxyS3CfgParam(config: S3Config): string {
   const cfg = {
     e: resolveEndpoint(config),
-    r: config.region,
+    r: resolveRegion(config),
     a: config.accessKeyId,
     s: config.secretAccessKey,
   };
@@ -464,7 +468,7 @@ export function getProxyHeaders(connectionId: string): Record<string, string> | 
   if (!config.proxyUrl) return null;
   const headers: Record<string, string> = {
     'X-S3-Endpoint': resolveEndpoint(config),
-    'X-S3-Region': config.region,
+    'X-S3-Region': resolveRegion(config),
     'X-S3-Access-Key': config.accessKeyId,
     'X-S3-Secret-Key': config.secretAccessKey,
   };
@@ -521,7 +525,7 @@ export async function registerProxyAlias(connectionId: string): Promise<void> {
   const base = config.proxyUrl.replace(/\/+$/, '');
   const body = {
     endpoint: resolveEndpoint(config),
-    region: config.region,
+    region: resolveRegion(config),
     accessKey: config.accessKeyId,
     secretKey: config.secretAccessKey,
   };

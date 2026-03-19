@@ -40,7 +40,7 @@ export default function RootLayout() {
           name="connections"
           options={{
             headerShown: false,
-            animation: 'slide_from_right',
+            animation: 'fade',
           }}
         />
         <Stack.Screen

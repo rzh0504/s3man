@@ -7,6 +7,7 @@ export default {
   edit: 'Edit',
   ok: 'OK',
   all: 'All',
+  moreInfo: 'More info',
 
   // ── Tabs ───────────────────────────────────────────────────────────────
   'tabs.buckets': 'Buckets',
@@ -83,6 +84,8 @@ export default {
   'form.b2SecretPlaceholder': 'B2 Master Application Key',
   'form.secretPlaceholder': 'Enter secret key',
   'form.region': 'Region',
+  'form.customRegionPlaceholder': 'e.g. us-east-1, leave empty to use default',
+  'form.customRegionHelp': 'For custom S3 providers, enter the region your service expects. Empty falls back to default.',
   'form.pathStyle': 'Path Style Access',
   'form.pathStyleHelp': 'Use path-style URLs (endpoint/bucket). Disable if your provider requires virtual-hosted style (bucket.endpoint).',
   'form.proxyUrl': 'Proxy URL',

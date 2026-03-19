@@ -7,6 +7,7 @@ export default {
   edit: '编辑',
   ok: '确定',
   all: '全部',
+  moreInfo: '更多信息',
 
   // ── 底部标签 ───────────────────────────────────────────────────────────
   'tabs.buckets': '存储桶',
@@ -83,6 +84,8 @@ export default {
   'form.b2SecretPlaceholder': 'B2 主应用密钥',
   'form.secretPlaceholder': '请输入密钥',
   'form.region': '区域',
+  'form.customRegionPlaceholder': '例如：us-east-1，留空则使用 default',
+  'form.customRegionHelp': '自定义 S3 服务商请按实际要求填写区域；留空会按 default 处理。',
   'form.pathStyle': '路径风格访问',
   'form.pathStyleHelp': '使用路径风格 URL（endpoint/bucket）。如果服务商要求虚拟主机风格（bucket.endpoint）请关闭。',
   'form.proxyUrl': '代理 URL',
