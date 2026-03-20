@@ -544,8 +544,14 @@ export default function ConnectionsScreen() {
         return;
       }
       const fileUri = result.assets[0].uri;
-      const response = await fetch(fileUri);
-      const content = await response.text();
+      // Native builds should read the picked file from the local filesystem.
+      // `fetch(file://...)` / `fetch(content://...)` can fail on Android release APKs.
+      const content =
+        Platform.OS === 'web'
+          ? await (await fetch(fileUri)).text()
+          : await FileSystem.readAsStringAsync(fileUri, {
+              encoding: FileSystem.EncodingType.UTF8,
+            });
       const payload = parseImportFile(content);
       let imported = 0;
       for (const entry of payload.connections) {
