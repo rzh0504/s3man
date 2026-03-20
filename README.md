@@ -23,7 +23,6 @@
 | :------------------------------------------------------------------------: | :--------------------------------------------------------------------: | :------------------------------------------------------------------------: |
 | ![buckets](https://s3.hi168.com/hi168-25959-33617kcp/s3man/bucketlist.jpg) | ![files](https://s3.hi168.com/hi168-25959-33617kcp/s3man/filelist.jpg) | ![preview](https://s3.hi168.com/hi168-25959-33617kcp/s3man/previewimg.jpg) |
 
-
 ## 技术栈
 
 - [Expo](https://expo.dev/) + [React Native](https://reactnative.dev/)
