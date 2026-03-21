@@ -54,6 +54,12 @@ export default {
   'settings.transferHistory1d': '1 天',
   'settings.transferHistory3d': '3 天',
   'settings.transferHistory7d': '7 天',
+  'settings.downloadDirectory': '下载目录',
+  'settings.downloadDirectoryDefault': '应用存储 / s3downloads',
+  'settings.downloadDirectoryAndroidDesc': 'Android 可通过系统目录选择器直接保存到你指定的文件夹。',
+  'settings.downloadDirectoryOtherDesc': '自定义目录目前仅支持 Android，其他平台会保存到应用内部存储。',
+  'settings.chooseDownloadDirectory': '选择文件夹',
+  'settings.resetDownloadDirectory': '使用默认目录',
 
   // ── 连接管理 ───────────────────────────────────────────────────────────
   'conn.title': '连接管理',
@@ -130,12 +136,16 @@ export default {
 
   // ── 传输 ───────────────────────────────────────────────────────────────
   'transfers.title': '传输',
+  'transfers.upload': '上传',
   'transfers.uploading': '上传中',
   'transfers.up': '上传',
+  'transfers.download': '下载',
   'transfers.downloading': '下载中',
   'transfers.down': '下载',
   'transfers.completed': '已完成',
   'transfers.done': '完成',
+  'transfers.inProgress': '进行中',
+  'transfers.completedHistory': '已完成',
   'transfers.noTransfers': '暂无传输',
   'transfers.noTransfersDesc': '上传或下载文件后，传输进度将显示在此处。',
   'transfers.noFilteredDesc': '暂无{filter}的传输任务。',
@@ -150,6 +160,11 @@ export default {
   'transfers.resume': '继续',
   'transfers.remove': '移除',
   'transfers.today': '今天',
+  'transfers.clearHistory': '清除记录',
+  'transfers.removeConfirmTitle': '移除传输记录',
+  'transfers.removeConfirmDesc': '确定从传输记录中移除“{name}”？',
+  'transfers.clearHistoryConfirmTitle': '清除传输记录',
+  'transfers.clearHistoryConfirmDesc': '确定清除所有已完成、失败和已暂停的传输记录？',
 
   // ── 存储桶详情 ─────────────────────────────────────────────────────────
   'bucket.files': '{count} 个文件',
@@ -167,8 +182,9 @@ export default {
   'bucket.deleteFiles': '删除文件',
   'bucket.deleteFilesDesc': '确定要删除 {count} 个文件吗？此操作不可撤销。',
   'bucket.deletingFiles': '删除中...',
+  'bucket.downloadStarted': '开始下载 {name}',
   'bucket.downloadComplete': '下载完成',
-  'bucket.downloadCompleteDesc': '{name} 已保存成功。',
+  'bucket.downloadCompleteDesc': '{name} 已保存到 {location}。',
   'bucket.share': '分享',
   'bucket.createFolder': '创建文件夹',
   'bucket.createFolderDesc': '请输入新文件夹的名称。',

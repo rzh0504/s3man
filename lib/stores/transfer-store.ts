@@ -16,6 +16,7 @@ interface TransferState {
   isLoaded: boolean;
   loadTasks: () => Promise<void>;
   pruneTasks: (retentionDays?: TransferHistoryDays) => void;
+  clearHistory: () => void;
   setFilter: (filter: TransferFilter) => void;
   addTask: (task: TransferTask) => void;
   updateTask: (id: string, updates: Partial<TransferTask>) => void;
@@ -128,6 +129,11 @@ export const useTransferStore = create<TransferState>((set, get) => {
       schedulePersist(tasks);
     },
 
+    clearHistory: () =>
+      commitTasks((tasks) =>
+        tasks.filter((task) => task.status === 'active' || task.status === 'pending')
+      ),
+
     setFilter: (filter) => set({ filter }),
 
     addTask: (task) => commitTasks((tasks) => [task, ...tasks]),
@@ -161,12 +167,10 @@ export const useTransferStore = create<TransferState>((set, get) => {
     filteredTasks: () => {
       const { tasks, filter } = get();
       switch (filter) {
-        case 'uploading':
-          return tasks.filter((task) => task.type === 'upload' && task.status !== 'completed');
-        case 'downloading':
-          return tasks.filter((task) => task.type === 'download' && task.status !== 'completed');
-        case 'completed':
-          return tasks.filter((task) => task.status === 'completed');
+        case 'upload':
+          return tasks.filter((task) => task.type === 'upload');
+        case 'download':
+          return tasks.filter((task) => task.type === 'download');
         default:
           return tasks;
       }

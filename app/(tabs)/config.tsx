@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { useConnectionStore } from '@/lib/stores/connection-store';
 import { useSettingsStore } from '@/lib/stores/settings-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
+import { formatDownloadDirectoryLabel, getDownloadDirectoryNameFromUri } from '@/lib/download-directory';
 import { useT } from '@/lib/i18n';
 import type { TranslationKey } from '@/lib/i18n';
 import {
@@ -19,8 +20,9 @@ import {
   LanguagesIcon,
 } from 'lucide-react-native';
 
+import * as FileSystem from 'expo-file-system/legacy';
 import * as React from 'react';
-import { View, ScrollView, Pressable } from 'react-native';
+import { View, ScrollView, Pressable, Alert, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   FadeInDown,
@@ -55,6 +57,9 @@ export default function ConfigScreen() {
     setLanguage,
     transferHistoryDays,
     setTransferHistoryDays,
+    downloadDirectoryUri,
+    downloadDirectoryName,
+    setDownloadDirectory,
   } = useSettingsStore();
 
   const connectedCount = connections.filter((c) => c.status === 'connected').length;
@@ -84,6 +89,43 @@ export default function ConfigScreen() {
     },
     [pruneTasks, setTransferHistoryDays]
   );
+
+  const downloadDirectoryLabel = React.useMemo(() => {
+    if (downloadDirectoryName) return formatDownloadDirectoryLabel(downloadDirectoryName);
+    if (downloadDirectoryUri) return formatDownloadDirectoryLabel(downloadDirectoryUri);
+    return t('settings.downloadDirectoryDefault');
+  }, [downloadDirectoryName, downloadDirectoryUri, t]);
+
+  const handlePickDownloadDirectory = React.useCallback(async () => {
+    if (Platform.OS !== 'android') {
+      Alert.alert(t('settings.downloadDirectory'), t('settings.downloadDirectoryOtherDesc'));
+      return;
+    }
+
+    try {
+      const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(
+        downloadDirectoryUri ?? null
+      );
+
+      if (!permissions.granted || !permissions.directoryUri) {
+        return;
+      }
+
+      setDownloadDirectory({
+        uri: permissions.directoryUri,
+        name: getDownloadDirectoryNameFromUri(permissions.directoryUri),
+      });
+    } catch (error: any) {
+      Alert.alert(
+        t('settings.downloadDirectory'),
+        error?.message || t('settings.downloadDirectoryAndroidDesc')
+      );
+    }
+  }, [downloadDirectoryUri, setDownloadDirectory, t]);
+
+  const handleResetDownloadDirectory = React.useCallback(() => {
+    setDownloadDirectory(null);
+  }, [setDownloadDirectory]);
 
   return (
     <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
@@ -172,8 +214,8 @@ export default function ConfigScreen() {
             <Separator />
 
             {/* Transfer History */}
-            <View className="px-4 py-3.5">
-              <Text className="text-foreground mb-3 text-sm font-medium">
+            <View className="flex-row items-center justify-between gap-3 px-4 py-3.5">
+              <Text className="text-foreground flex-1 text-sm font-medium">
                 {t('settings.transferHistoryDays')}
               </Text>
               <View className="bg-muted flex-row gap-1 rounded-lg p-1">
@@ -183,13 +225,13 @@ export default function ConfigScreen() {
                     <Pressable
                       key={option}
                       onPress={() => handleTransferHistoryDaysChange(option)}
-                      className={`flex-1 items-center justify-center rounded-md px-3 py-2 ${
+                      className={`min-w-12 items-center justify-center rounded-md px-2.5 py-1.5 ${
                         isActive
                           ? 'bg-background border border-transparent shadow-sm shadow-black/5 dark:border-foreground/10 dark:bg-input/30'
                           : ''
                       }`}>
                       <Text
-                        className={`text-sm font-medium ${
+                        className={`text-xs font-medium ${
                           isActive ? 'text-foreground' : 'text-muted-foreground'
                         }`}>
                         {t(TRANSFER_HISTORY_LABELS[option])}
@@ -198,6 +240,43 @@ export default function ConfigScreen() {
                   );
                 })}
               </View>
+            </View>
+
+            <Separator />
+
+            {/* Download Directory */}
+            <View className="px-4 py-3.5">
+              <View className="flex-row items-center justify-between gap-3">
+                <Text className="text-foreground text-sm font-medium">
+                  {t('settings.downloadDirectory')}
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  className="text-muted-foreground max-w-52 flex-1 text-right text-sm">
+                  {downloadDirectoryLabel}
+                </Text>
+              </View>
+
+              {Platform.OS === 'android' ? (
+                <View className="mt-3 flex-row gap-2">
+                  <Pressable
+                    onPress={handlePickDownloadDirectory}
+                    className="bg-secondary active:bg-secondary/80 rounded-lg px-3 py-2">
+                    <Text className="text-secondary-foreground text-sm font-medium">
+                      {t('settings.chooseDownloadDirectory')}
+                    </Text>
+                  </Pressable>
+                  {downloadDirectoryUri ? (
+                    <Pressable
+                      onPress={handleResetDownloadDirectory}
+                      className="border-border active:bg-accent rounded-lg border px-3 py-2">
+                      <Text className="text-foreground text-sm font-medium">
+                        {t('settings.resetDownloadDirectory')}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
 
             <Separator />

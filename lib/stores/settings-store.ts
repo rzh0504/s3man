@@ -31,29 +31,44 @@ interface SettingsState {
   showThumbnails: boolean;
   language: Locale;
   transferHistoryDays: TransferHistoryDays;
+  downloadDirectoryUri: string | null;
+  downloadDirectoryName: string | null;
   isLoaded: boolean;
   loadSettings: () => Promise<void>;
   setShowThumbnails: (value: boolean) => void;
   setLanguage: (value: Locale) => void;
   setTransferHistoryDays: (value: TransferHistoryDays) => void;
+  setDownloadDirectory: (value: { uri: string; name: string } | null) => void;
 }
 
 function buildPersistedSettings({
   showThumbnails,
   language,
   transferHistoryDays,
+  downloadDirectoryUri,
+  downloadDirectoryName,
 }: {
   showThumbnails: boolean;
   language: Locale;
   transferHistoryDays: TransferHistoryDays;
+  downloadDirectoryUri: string | null;
+  downloadDirectoryName: string | null;
 }) {
-  return { showThumbnails, language, transferHistoryDays };
+  return {
+    showThumbnails,
+    language,
+    transferHistoryDays,
+    downloadDirectoryUri,
+    downloadDirectoryName,
+  };
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   showThumbnails: false,
   language: 'zh',
   transferHistoryDays: 1,
+  downloadDirectoryUri: null,
+  downloadDirectoryName: null,
   isLoaded: false,
 
   loadSettings: async () => {
@@ -66,6 +81,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         showThumbnails: !!data.showThumbnails,
         language: lang,
         transferHistoryDays,
+        downloadDirectoryUri:
+          typeof data.downloadDirectoryUri === 'string' ? data.downloadDirectoryUri : null,
+        downloadDirectoryName:
+          typeof data.downloadDirectoryName === 'string' ? data.downloadDirectoryName : null,
         isLoaded: true,
       });
       useI18nStore.getState().setLocale(lang);
@@ -81,6 +100,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         showThumbnails: value,
         language: get().language,
         transferHistoryDays: get().transferHistoryDays,
+        downloadDirectoryUri: get().downloadDirectoryUri,
+        downloadDirectoryName: get().downloadDirectoryName,
       })
     );
   },
@@ -93,6 +114,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         showThumbnails: get().showThumbnails,
         language: value,
         transferHistoryDays: get().transferHistoryDays,
+        downloadDirectoryUri: get().downloadDirectoryUri,
+        downloadDirectoryName: get().downloadDirectoryName,
       })
     );
   },
@@ -104,6 +127,24 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         showThumbnails: get().showThumbnails,
         language: get().language,
         transferHistoryDays: value,
+        downloadDirectoryUri: get().downloadDirectoryUri,
+        downloadDirectoryName: get().downloadDirectoryName,
+      })
+    );
+  },
+
+  setDownloadDirectory: (value) => {
+    set({
+      downloadDirectoryUri: value?.uri ?? null,
+      downloadDirectoryName: value?.name ?? null,
+    });
+    saveToStorage(
+      buildPersistedSettings({
+        showThumbnails: get().showThumbnails,
+        language: get().language,
+        transferHistoryDays: get().transferHistoryDays,
+        downloadDirectoryUri: value?.uri ?? null,
+        downloadDirectoryName: value?.name ?? null,
       })
     );
   },

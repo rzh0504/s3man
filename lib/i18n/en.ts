@@ -54,6 +54,14 @@ export default {
   'settings.transferHistory1d': '1 Day',
   'settings.transferHistory3d': '3 Days',
   'settings.transferHistory7d': '7 Days',
+  'settings.downloadDirectory': 'Download Directory',
+  'settings.downloadDirectoryDefault': 'App storage / s3downloads',
+  'settings.downloadDirectoryAndroidDesc':
+    'Android can save directly into a folder you pick from the system file picker.',
+  'settings.downloadDirectoryOtherDesc':
+    'Custom folders are only supported on Android. Other platforms save into app storage.',
+  'settings.chooseDownloadDirectory': 'Choose Folder',
+  'settings.resetDownloadDirectory': 'Use Default',
 
   // ── Connections ────────────────────────────────────────────────────────
   'conn.title': 'Connection',
@@ -130,12 +138,16 @@ export default {
 
   // ── Transfers ──────────────────────────────────────────────────────────
   'transfers.title': 'Transfers',
+  'transfers.upload': 'Upload',
   'transfers.uploading': 'Uploading',
   'transfers.up': 'Up',
+  'transfers.download': 'Download',
   'transfers.downloading': 'Downloading',
   'transfers.down': 'Down',
   'transfers.completed': 'Completed',
   'transfers.done': 'Done',
+  'transfers.inProgress': 'In Progress',
+  'transfers.completedHistory': 'Completed',
   'transfers.noTransfers': 'No Transfers',
   'transfers.noTransfersDesc': 'Upload or download files to see transfer progress here.',
   'transfers.noFilteredDesc': 'No {filter} transfers.',
@@ -150,6 +162,11 @@ export default {
   'transfers.resume': 'Resume',
   'transfers.remove': 'Remove',
   'transfers.today': 'Today',
+  'transfers.clearHistory': 'Clear history',
+  'transfers.removeConfirmTitle': 'Remove transfer record',
+  'transfers.removeConfirmDesc': 'Remove "{name}" from transfer history?',
+  'transfers.clearHistoryConfirmTitle': 'Clear transfer history',
+  'transfers.clearHistoryConfirmDesc': 'Remove all completed, failed, and paused transfer records?',
 
   // ── Bucket Detail ──────────────────────────────────────────────────────
   'bucket.files': '{count} files',
@@ -167,8 +184,9 @@ export default {
   'bucket.deleteFiles': 'Delete Files',
   'bucket.deleteFilesDesc': 'Are you sure you want to delete {count} file(s)? This action cannot be undone.',
   'bucket.deletingFiles': 'Deleting...',
+  'bucket.downloadStarted': 'Downloading {name}',
   'bucket.downloadComplete': 'Download Complete',
-  'bucket.downloadCompleteDesc': '{name} saved successfully.',
+  'bucket.downloadCompleteDesc': '{name} saved to {location}.',
   'bucket.share': 'Share',
   'bucket.createFolder': 'Create Folder',
   'bucket.createFolderDesc': 'Enter a name for the new folder.',

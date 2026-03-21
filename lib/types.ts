@@ -72,10 +72,11 @@ export interface TransferTask {
   /** 所属连接 ID */
   connectionId: string;
   localPath?: string;
+  previewPath?: string;
   error?: string;
   startedAt: string;
   completedAt?: string;
 }
 
 // 传输过滤标签
-export type TransferFilter = 'all' | 'uploading' | 'downloading' | 'completed';
+export type TransferFilter = 'all' | 'upload' | 'download';

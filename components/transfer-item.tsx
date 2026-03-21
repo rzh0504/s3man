@@ -108,7 +108,8 @@ export const TransferItem = React.memo(function TransferItem({
     const ext = getFileExtension(task.fileName);
     return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(ext);
   })();
-  const hasThumbnail = isImage && !!task.localPath;
+  const thumbnailUri = task.previewPath || task.localPath;
+  const hasThumbnail = isImage && !!thumbnailUri;
   const isActive = task.status === 'active';
   const isPaused = task.status === 'paused';
   const isCompleted = task.status === 'completed';
@@ -148,7 +149,7 @@ export const TransferItem = React.memo(function TransferItem({
           <View className="flex-row items-center gap-3">
             {hasThumbnail ? (
               <Image
-                source={{ uri: task.localPath }}
+                source={{ uri: thumbnailUri }}
                 className="size-10 rounded-md"
                 resizeMode="cover"
               />

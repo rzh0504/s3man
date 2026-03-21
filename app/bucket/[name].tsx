@@ -49,15 +49,23 @@ import {
   Share,
   ActivityIndicator,
   BackHandler,
+  Alert,
+  ToastAndroid,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 import type { S3Object, TransferTask } from '@/lib/types';
 import { Progress } from '@/components/ui/progress';
 import { invalidateBucketCache } from '@/lib/cache';
+import {
+  copyFileToSafDirectoryAsync,
+  createUniqueAppDownloadUriAsync,
+  formatDownloadDirectoryLabel,
+  getDownloadDirectoryNameFromUri,
+  isSafDirectoryUri,
+} from '@/lib/download-directory';
 import { useSettingsStore } from '@/lib/stores/settings-store';
 import { useT } from '@/lib/i18n';
 import {
@@ -172,10 +180,6 @@ export default function ObjectBrowserScreen() {
   // Dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [isDeletingFiles, setIsDeletingFiles] = React.useState(false);
-  const [downloadCompleteDialog, setDownloadCompleteDialog] = React.useState<{
-    name: string;
-    uri: string;
-  } | null>(null);
 
   // Track whether we've done at least one successful load
   const [initialLoaded, setInitialLoaded] = React.useState(false);
@@ -200,6 +204,19 @@ export default function ObjectBrowserScreen() {
   // Thumbnail presigned URLs cache
   const [thumbnailUrls, setThumbnailUrls] = React.useState<Record<string, string>>({});
   const showThumbnails = useSettingsStore((s) => s.showThumbnails);
+  const downloadDirectoryUri = useSettingsStore((s) => s.downloadDirectoryUri);
+  const downloadDirectoryName = useSettingsStore((s) => s.downloadDirectoryName);
+
+  const showSystemToast = React.useCallback(
+    (message: string) => {
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(message, ToastAndroid.SHORT);
+        return;
+      }
+      Alert.alert('', message);
+    },
+    []
+  );
 
   const crumbs = React.useMemo(() => breadcrumbs(), [currentPrefix]);
   const selectedCount = selectedKeys.size;
@@ -418,6 +435,7 @@ export default function ObjectBrowserScreen() {
       if (!bucketName || !connectionId) return;
 
       const taskId = generateId();
+      let appDownloadUri: string | null = null;
       const task: TransferTask = {
         id: taskId,
         fileName: obj.name,
@@ -432,45 +450,71 @@ export default function ObjectBrowserScreen() {
         startedAt: new Date().toISOString(),
       };
       addTask(task);
+      showSystemToast(t('bucket.downloadStarted', { name: obj.name }));
 
       try {
         const url = await S3Service.getFileUrl(connectionId, bucketName, obj.key);
-
-        // Ensure download directory exists
-        const downloadDir = FileSystem.documentDirectory + 's3downloads/';
-        const dirInfo = await FileSystem.getInfoAsync(downloadDir);
-        if (!dirInfo.exists) {
-          await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
-        }
-
-        const destUri = downloadDir + obj.name;
+        const defaultLocationLabel = t('settings.downloadDirectoryDefault');
+        appDownloadUri = await createUniqueAppDownloadUriAsync(obj.name);
+        const isImageDownload = S3Service.isImageFile(obj.name);
         updateTask(taskId, { progress: 10 });
 
-        const downloadResult = await FileSystem.downloadAsync(url, destUri, {
+        const downloadResult = await FileSystem.downloadAsync(url, appDownloadUri, {
           headers: S3Service.getProxyHeaders(connectionId) || undefined,
         });
+
+        let finalUri = downloadResult.uri;
+        let locationLabel = defaultLocationLabel;
+
+        if (Platform.OS === 'android' && isSafDirectoryUri(downloadDirectoryUri)) {
+          finalUri = await copyFileToSafDirectoryAsync({
+            sourceUri: downloadResult.uri,
+            directoryUri: downloadDirectoryUri,
+            fileName: obj.name,
+            mimeType: S3Service.guessMimeType(obj.name),
+          });
+          locationLabel = formatDownloadDirectoryLabel(
+            downloadDirectoryName || getDownloadDirectoryNameFromUri(downloadDirectoryUri)
+          );
+          if (!isImageDownload) {
+            await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(() => {});
+          }
+        }
 
         updateTask(taskId, {
           progress: 100,
           transferredBytes: obj.size ?? 0,
           status: 'completed',
-          localPath: downloadResult.uri,
+          localPath: finalUri,
+          previewPath:
+            Platform.OS === 'android' && isSafDirectoryUri(downloadDirectoryUri) && isImageDownload
+              ? downloadResult.uri
+              : undefined,
           completedAt: new Date().toISOString(),
         });
-
-        // Offer to share/save the file
-        if (await Sharing.isAvailableAsync()) {
-          setDownloadCompleteDialog({ name: obj.name, uri: downloadResult.uri });
-        }
+        showSystemToast(t('bucket.downloadCompleteDesc', { name: obj.name, location: locationLabel }));
       } catch (error: any) {
         console.error('Download error:', error);
+        if (appDownloadUri) {
+          await FileSystem.deleteAsync(appDownloadUri, { idempotent: true }).catch(() => {});
+        }
         updateTask(taskId, {
           status: 'failed',
           error: error.message || 'Download failed',
         });
+        showSystemToast(error.message || t('bucket.downloadFailed'));
       }
     },
-    [bucketName, connectionId, addTask, updateTask]
+    [
+      bucketName,
+      connectionId,
+      addTask,
+      updateTask,
+      downloadDirectoryUri,
+      downloadDirectoryName,
+      showSystemToast,
+      t,
+    ]
   );
 
   const handlePull = React.useCallback(async () => {
@@ -1027,36 +1071,6 @@ export default function ObjectBrowserScreen() {
               disabled={isDeletingFiles}>
               {isDeletingFiles && <ActivityIndicator size="small" color="#fff" />}
               <Text>{isDeletingFiles ? t('bucket.deletingFiles') : t('delete')}</Text>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Download Complete Dialog */}
-      <AlertDialog
-        open={downloadCompleteDialog !== null}
-        onOpenChange={(open) => {
-          if (!open) setDownloadCompleteDialog(null);
-        }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('bucket.downloadComplete')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('bucket.downloadCompleteDesc', { name: downloadCompleteDialog?.name ?? '' })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Text>{t('ok')}</Text>
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onPress={() => {
-                if (downloadCompleteDialog) {
-                  Sharing.shareAsync(downloadCompleteDialog.uri);
-                }
-                setDownloadCompleteDialog(null);
-              }}>
-              <Text className="text-primary-foreground">{t('bucket.share')}</Text>
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
