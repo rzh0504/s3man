@@ -7,19 +7,13 @@ import { TransferItem } from '@/components/transfer-item';
 import { EmptyState } from '@/components/empty-state';
 import { useTransferStore } from '@/lib/stores/transfer-store';
 import type { TransferFilter, TransferTask } from '@/lib/types';
-import {
-  ArrowUpIcon,
-  ArrowDownIcon,
-  ArrowLeftRightIcon,
-  CheckCircleIcon,
-  ListIcon,
-} from 'lucide-react-native';
+import { ArrowLeftRightIcon, ListIcon } from 'lucide-react-native';
 import * as React from 'react';
-import { View, FlatList, Pressable } from 'react-native';
+import { View, SectionList, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
-import { useT } from '@/lib/i18n';
-import type { TranslationKey } from '@/lib/i18n';
+import { useI18nStore, useT } from '@/lib/i18n';
+import type { Locale, TranslationKey } from '@/lib/i18n';
 
 const TABS: { value: TransferFilter; labelKey: TranslationKey; shortLabelKey: TranslationKey }[] = [
   { value: 'all', labelKey: 'all', shortLabelKey: 'all' },
@@ -29,6 +23,35 @@ const TABS: { value: TransferFilter; labelKey: TranslationKey; shortLabelKey: Tr
 ];
 
 const TIMING_CONFIG = { duration: 200, easing: Easing.out(Easing.quad) };
+
+type TransferSection = {
+  title: string;
+  key: string;
+  data: TransferTask[];
+};
+
+function getDayKey(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'unknown';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatSectionTitle(dayKey: string, locale: Locale, todayLabel: string) {
+  const todayKey = getDayKey(new Date().toISOString());
+  if (dayKey === todayKey) return todayLabel;
+  if (dayKey === 'unknown') return dayKey;
+
+  const [year, month, day] = dayKey.split('-').map(Number);
+  const date = new Date(year, (month || 1) - 1, day || 1);
+  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
 
 function AnimatedTab({
   labelKey,
@@ -72,20 +95,49 @@ function AnimatedTab({
 export default function TransfersScreen() {
   const insets = useSafeAreaInsets();
   const t = useT();
+  const locale = useI18nStore((s) => s.locale);
   const { tasks, filter, setFilter, filteredTasks, pauseTask, resumeTask, cancelTask, removeTask } =
     useTransferStore();
 
   const displayTasks = React.useMemo(() => filteredTasks(), [tasks, filter]);
+  const sections = React.useMemo<TransferSection[]>(() => {
+    const grouped = new Map<string, TransferTask[]>();
+    const sortedTasks = [...displayTasks].sort((a, b) => {
+      const aTime = new Date(a.startedAt).getTime();
+      const bTime = new Date(b.startedAt).getTime();
+      return bTime - aTime;
+    });
+
+    for (const task of sortedTasks) {
+      const key = getDayKey(task.startedAt);
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.push(task);
+      } else {
+        grouped.set(key, [task]);
+      }
+    }
+
+    return Array.from(grouped.entries())
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([key, data]) => ({
+        key,
+        title: formatSectionTitle(key, locale, t('transfers.today')),
+        data,
+      }));
+  }, [displayTasks, locale, t]);
 
   const renderItem = React.useCallback(
     ({ item }: { item: TransferTask }) => (
-      <TransferItem
-        task={item}
-        onPause={() => pauseTask(item.id)}
-        onResume={() => resumeTask(item.id)}
-        onCancel={() => cancelTask(item.id)}
-        onRemove={() => removeTask(item.id)}
-      />
+      <View className="mb-3 px-4">
+        <TransferItem
+          task={item}
+          onPause={() => pauseTask(item.id)}
+          onResume={() => resumeTask(item.id)}
+          onCancel={() => cancelTask(item.id)}
+          onRemove={() => removeTask(item.id)}
+        />
+      </View>
     ),
     [pauseTask, resumeTask, cancelTask, removeTask]
   );
@@ -116,11 +168,17 @@ export default function TransfersScreen() {
       </View>
 
       {/* Transfer List */}
-      <FlatList
-        data={displayTasks}
+      <SectionList
+        sections={sections}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
-        contentContainerClassName="px-4 pb-6 gap-3 pt-2"
+        renderSectionHeader={({ section }) => (
+          <View className="px-4 pb-2 pt-3">
+            <Text className="text-muted-foreground text-xs font-medium">{section.title}</Text>
+          </View>
+        )}
+        stickySectionHeadersEnabled={false}
+        contentContainerClassName="pb-6 pt-2"
         ListEmptyComponent={
           <EmptyState
             icon={ListIcon}
@@ -132,6 +190,7 @@ export default function TransfersScreen() {
             }
           />
         }
+        renderSectionFooter={() => <View className="h-1" />}
       />
     </ScreenTransitionView>
   );

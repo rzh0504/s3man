@@ -48,7 +48,6 @@ import {
   ScrollView,
   Pressable,
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
   Alert,
 } from 'react-native';
@@ -56,6 +55,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { useRouter } from 'expo-router';
 import { useT } from '@/lib/i18n';
@@ -580,19 +580,19 @@ export default function ConnectionsScreen() {
 
   if (showForm) {
     return (
-      <KeyboardAvoidingView
-        className="bg-background flex-1"
-        style={{ paddingTop: insets.top }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
         <Animated.View
           className="flex-1"
           entering={FadeInRight.duration(220).reduceMotion(ReduceMotion.System)}
           exiting={FadeOutRight.duration(140).reduceMotion(ReduceMotion.System)}>
           <ScreenTransitionView className="flex-1" disabled>
-            <ScrollView
+            <KeyboardAwareScrollView
               className="flex-1"
               contentContainerClassName="p-6 pb-12"
-              keyboardShouldPersistTaps="handled">
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              bottomOffset={24}
+              extraKeyboardSpace={insets.bottom + 24}>
             {/* Form Header */}
             <View className="mb-4 flex-row items-center gap-2.5">
               <Pressable onPress={handleCancel} className="rounded-md p-1">
@@ -1004,10 +1004,10 @@ export default function ConnectionsScreen() {
               )}
             </Button>
           </View>
-            </ScrollView>
+            </KeyboardAwareScrollView>
           </ScreenTransitionView>
         </Animated.View>
-      </KeyboardAvoidingView>
+      </View>
     );
   }
 

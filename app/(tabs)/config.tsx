@@ -5,10 +5,11 @@ import { ScreenTransitionView } from '@/components/ui/screen-transition-view';
 import { Separator } from '@/components/ui/separator';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
-import { InfoTooltip } from '@/components/info-tooltip';
 import { useConnectionStore } from '@/lib/stores/connection-store';
 import { useSettingsStore } from '@/lib/stores/settings-store';
+import { useTransferStore } from '@/lib/stores/transfer-store';
 import { useT } from '@/lib/i18n';
+import type { TranslationKey } from '@/lib/i18n';
 import {
   ChevronRightIcon,
   SettingsIcon,
@@ -33,13 +34,28 @@ import Animated, {
 import { Uniwind, useUniwind } from 'uniwind';
 import { useRouter } from 'expo-router';
 
+const TRANSFER_HISTORY_OPTIONS = [1, 3, 7] as const;
+const TRANSFER_HISTORY_LABELS: Record<(typeof TRANSFER_HISTORY_OPTIONS)[number], TranslationKey> = {
+  1: 'settings.transferHistory1d',
+  3: 'settings.transferHistory3d',
+  7: 'settings.transferHistory7d',
+};
+
 export default function ConfigScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme } = useUniwind();
   const t = useT();
   const connections = useConnectionStore((s) => s.connections);
-  const { showThumbnails, setShowThumbnails, language, setLanguage } = useSettingsStore();
+  const pruneTasks = useTransferStore((s) => s.pruneTasks);
+  const {
+    showThumbnails,
+    setShowThumbnails,
+    language,
+    setLanguage,
+    transferHistoryDays,
+    setTransferHistoryDays,
+  } = useSettingsStore();
 
   const connectedCount = connections.filter((c) => c.status === 'connected').length;
 
@@ -61,6 +77,14 @@ export default function ConfigScreen() {
     setLanguage(language === 'zh' ? 'en' : 'zh');
   }, [language, setLanguage]);
 
+  const handleTransferHistoryDaysChange = React.useCallback(
+    (value: (typeof TRANSFER_HISTORY_OPTIONS)[number]) => {
+      setTransferHistoryDays(value);
+      pruneTasks(value);
+    },
+    [pruneTasks, setTransferHistoryDays]
+  );
+
   return (
     <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
       {/* Header */}
@@ -78,27 +102,24 @@ export default function ConfigScreen() {
         <NativeOnlyAnimatedView
           entering={FadeInDown.duration(200).reduceMotion(ReduceMotion.System)}>
           <View className="border-border bg-card rounded-xl border">
-            <View className="flex-row items-center gap-3 px-4 py-3.5">
+            <Pressable
+              onPress={() => router.push('/connections' as any)}
+              className="active:bg-accent flex-row items-center gap-3 rounded-xl px-4 py-3.5">
               <Icon as={WifiIcon} className="text-foreground size-5" />
-              <Pressable
-                onPress={() => router.push('/connections' as any)}
-                className="active:bg-accent -my-3.5 -ml-1 flex-1 rounded-lg px-1 py-3.5">
-                <View className="flex-row items-center justify-between">
-                  <Text className="text-foreground text-sm font-medium">
-                    {t('settings.connections')}
-                  </Text>
-                  <View className="ml-3 flex-row items-center gap-2">
-                    <Badge variant="secondary">
-                      <Text className="text-xs">
-                        {connectedCount}/{connections.length}
-                      </Text>
-                    </Badge>
-                    <Icon as={ChevronRightIcon} className="text-muted-foreground size-4" />
-                  </View>
+              <View className="flex-1 flex-row items-center justify-between">
+                <Text className="text-foreground text-sm font-medium">
+                  {t('settings.connections')}
+                </Text>
+                <View className="ml-3 flex-row items-center gap-2">
+                  <Badge variant="secondary">
+                    <Text className="text-xs">
+                      {connectedCount}/{connections.length}
+                    </Text>
+                  </Badge>
+                  <Icon as={ChevronRightIcon} className="text-muted-foreground size-4" />
                 </View>
-              </Pressable>
-              <InfoTooltip text={t('settings.connectionsDesc')} />
-            </View>
+              </View>
+            </Pressable>
           </View>
         </NativeOnlyAnimatedView>
 
@@ -114,16 +135,21 @@ export default function ConfigScreen() {
           <View className="border-border bg-card rounded-xl border">
             {/* Theme */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">
-              <Pressable onPress={toggleTheme} className="active:bg-accent -my-3.5 -ml-1 flex-1 rounded-lg px-1 py-3.5">
+              <View className="flex-1">
                 <Text className="text-foreground text-sm font-medium">{t('settings.darkMode')}</Text>
+              </View>
+              <Pressable
+                onPress={toggleTheme}
+                className="active:bg-accent -my-2 -mr-1 rounded-full p-2"
+                accessibilityRole="button"
+                accessibilityLabel={t('settings.darkMode')}>
+                <Animated.View style={themeIconStyle}>
+                  <Icon
+                    as={theme === 'dark' ? SunIcon : MoonIcon}
+                    className="text-muted-foreground size-5"
+                  />
+                </Animated.View>
               </Pressable>
-              <InfoTooltip text={t('settings.darkModeDesc')} />
-              <Animated.View style={themeIconStyle}>
-                <Icon
-                  as={theme === 'dark' ? SunIcon : MoonIcon}
-                  className="text-muted-foreground size-5"
-                />
-              </Animated.View>
             </View>
 
             <Separator />
@@ -137,7 +163,6 @@ export default function ConfigScreen() {
                   {t('settings.thumbnails')}
                 </Text>
               </Pressable>
-              <InfoTooltip text={t('settings.thumbnailsDesc')} />
               <Checkbox
                 checked={showThumbnails}
                 onCheckedChange={(checked) => setShowThumbnails(!!checked)}
@@ -146,19 +171,53 @@ export default function ConfigScreen() {
 
             <Separator />
 
+            {/* Transfer History */}
+            <View className="px-4 py-3.5">
+              <Text className="text-foreground mb-3 text-sm font-medium">
+                {t('settings.transferHistoryDays')}
+              </Text>
+              <View className="bg-muted flex-row gap-1 rounded-lg p-1">
+                {TRANSFER_HISTORY_OPTIONS.map((option) => {
+                  const isActive = transferHistoryDays === option;
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => handleTransferHistoryDaysChange(option)}
+                      className={`flex-1 items-center justify-center rounded-md px-3 py-2 ${
+                        isActive
+                          ? 'bg-background border border-transparent shadow-sm shadow-black/5 dark:border-foreground/10 dark:bg-input/30'
+                          : ''
+                      }`}>
+                      <Text
+                        className={`text-sm font-medium ${
+                          isActive ? 'text-foreground' : 'text-muted-foreground'
+                        }`}>
+                        {t(TRANSFER_HISTORY_LABELS[option])}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <Separator />
+
             {/* Language */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">
-              <Pressable
-                onPress={toggleLanguage}
-                className="active:bg-accent -my-3.5 -ml-1 flex-1 rounded-lg px-1 py-3.5">
+              <View className="flex-1">
                 <Text className="text-foreground text-sm font-medium">{t('settings.language')}</Text>
-              </Pressable>
-              <InfoTooltip text={t('settings.languageDesc')} />
+              </View>
               <View className="flex-row items-center gap-2">
                 <Text className="text-muted-foreground text-sm">
                   {language === 'zh' ? t('settings.languageZh') : t('settings.languageEn')}
                 </Text>
-                <Icon as={LanguagesIcon} className="text-muted-foreground size-5" />
+                <Pressable
+                  onPress={toggleLanguage}
+                  className="active:bg-accent -my-2 -mr-1 rounded-full p-2"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('settings.language')}>
+                  <Icon as={LanguagesIcon} className="text-muted-foreground size-5" />
+                </Pressable>
               </View>
             </View>
           </View>

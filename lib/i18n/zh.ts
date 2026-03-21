@@ -50,6 +50,10 @@ export default {
   'settings.languageDesc': '切换应用显示语言',
   'settings.languageEn': 'English',
   'settings.languageZh': '中文',
+  'settings.transferHistoryDays': '传输记录保留',
+  'settings.transferHistory1d': '1 天',
+  'settings.transferHistory3d': '3 天',
+  'settings.transferHistory7d': '7 天',
 
   // ── 连接管理 ───────────────────────────────────────────────────────────
   'conn.title': '连接管理',
@@ -145,6 +149,7 @@ export default {
   'transfers.pause': '暂停',
   'transfers.resume': '继续',
   'transfers.remove': '移除',
+  'transfers.today': '今天',
 
   // ── 存储桶详情 ─────────────────────────────────────────────────────────
   'bucket.files': '{count} 个文件',

@@ -50,6 +50,10 @@ export default {
   'settings.languageDesc': 'Switch app display language',
   'settings.languageEn': 'English',
   'settings.languageZh': '中文',
+  'settings.transferHistoryDays': 'Transfer History Retention',
+  'settings.transferHistory1d': '1 Day',
+  'settings.transferHistory3d': '3 Days',
+  'settings.transferHistory7d': '7 Days',
 
   // ── Connections ────────────────────────────────────────────────────────
   'conn.title': 'Connection',
@@ -145,6 +149,7 @@ export default {
   'transfers.pause': 'Pause',
   'transfers.resume': 'Resume',
   'transfers.remove': 'Remove',
+  'transfers.today': 'Today',
 
   // ── Bucket Detail ──────────────────────────────────────────────────────
   'bucket.files': '{count} files',

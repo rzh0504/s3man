@@ -12,7 +12,9 @@ import { useUniwind } from 'uniwind';
 import { useConnectionStore } from '@/lib/stores/connection-store';
 import { useBucketStore } from '@/lib/stores/bucket-store';
 import { useSettingsStore } from '@/lib/stores/settings-store';
+import { useTransferStore } from '@/lib/stores/transfer-store';
 import { useEffect } from 'react';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -24,41 +26,47 @@ export default function RootLayout() {
   const loadConnections = useConnectionStore((s) => s.loadConnections);
   const loadCachedBuckets = useBucketStore((s) => s.loadCachedBuckets);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
+  const loadTransfers = useTransferStore((s) => s.loadTasks);
 
   useEffect(() => {
-    loadSettings();
-    loadCachedBuckets();
-    loadConnections();
-  }, [loadConnections, loadCachedBuckets, loadSettings]);
+    const bootstrap = async () => {
+      await loadSettings();
+      await Promise.all([loadCachedBuckets(), loadConnections(), loadTransfers()]);
+    };
+
+    void bootstrap();
+  }, [loadConnections, loadCachedBuckets, loadSettings, loadTransfers]);
 
   return (
-    <ThemeProvider value={NAV_THEME[(theme ?? 'light') as keyof typeof NAV_THEME]}>
-      <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
-      <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false, animation: 'none' }} />
-        <Stack.Screen
-          name="connections"
-          options={{
-            headerShown: false,
-            animation: 'fade',
-          }}
-        />
-        <Stack.Screen
-          name="bucket/[name]"
-          options={{
-            headerShown: false,
-            animation: 'fade_from_bottom',
-          }}
-        />
-        <Stack.Screen
-          name="handle-share"
-          options={{
-            headerShown: false,
-            animation: 'slide_from_bottom',
-          }}
-        />
-      </Stack>
-      <PortalHost />
-    </ThemeProvider>
+    <KeyboardProvider>
+      <ThemeProvider value={NAV_THEME[(theme ?? 'light') as keyof typeof NAV_THEME]}>
+        <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
+        <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false, animation: 'none' }} />
+          <Stack.Screen
+            name="connections"
+            options={{
+              headerShown: false,
+              animation: 'fade',
+            }}
+          />
+          <Stack.Screen
+            name="bucket/[name]"
+            options={{
+              headerShown: false,
+              animation: 'fade_from_bottom',
+            }}
+          />
+          <Stack.Screen
+            name="handle-share"
+            options={{
+              headerShown: false,
+              animation: 'slide_from_bottom',
+            }}
+          />
+        </Stack>
+        <PortalHost />
+      </ThemeProvider>
+    </KeyboardProvider>
   );
 }
