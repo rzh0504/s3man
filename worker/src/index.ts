@@ -45,6 +45,31 @@ interface S3Cfg {
   s: string;
 }
 
+interface CachedS3Cfg {
+  value: S3Cfg;
+  expiresAt: number;
+}
+
+interface ResolvedRequest {
+  s3Cfg: S3Cfg;
+  bucket: string;
+  key: string;
+  mode: 'inline' | 'alias';
+}
+
+interface CfAwareRequestInit extends RequestInit {
+  cf?: {
+    cacheEverything?: boolean;
+    cacheTtlByStatus?: Record<string, number>;
+  };
+}
+
+const BROWSER_CACHE_TTL_SECONDS = 3600;
+const EDGE_CACHE_TTL_SECONDS = 86400;
+const NOT_FOUND_CACHE_TTL_SECONDS = 60;
+const ALIAS_CACHE_TTL_MS = 10 * 60 * 1000;
+const aliasConfigCache = new Map<string, CachedS3Cfg>();
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // ── CORS preflight ──────────────────────────────────────────
@@ -64,7 +89,7 @@ export default {
     // ── Resolve S3 config and path ──────────────────────────────
     const resolved = await resolveRequest(request, url, env);
     if (resolved instanceof Response) return resolved;
-    const { s3Cfg, bucket, key } = resolved;
+    const { s3Cfg, bucket, key, mode } = resolved;
 
     // ── Build S3 request ────────────────────────────────────────
     const s3Url = `${s3Cfg.e}/${bucket}/${key}`;
@@ -85,7 +110,7 @@ export default {
       contentType: request.headers.get('Content-Type') || undefined,
     });
 
-    const s3Request: RequestInit = {
+    const s3Request: CfAwareRequestInit = {
       method,
       headers: s3Headers,
     };
@@ -97,6 +122,17 @@ export default {
     }
 
     // ── Forward to S3 ───────────────────────────────────────────
+    if (method === 'GET' || method === 'HEAD') {
+      s3Request.cf = {
+        cacheEverything: true,
+        cacheTtlByStatus: {
+          '200-299': EDGE_CACHE_TTL_SECONDS,
+          '404': NOT_FOUND_CACHE_TTL_SECONDS,
+          '500-599': 0,
+        },
+      };
+    }
+
     const s3Response = await fetch(s3Url, s3Request);
 
     // ── Build response ──────────────────────────────────────────
@@ -116,9 +152,16 @@ export default {
       if (val) responseHeaders.set(h, val);
     }
 
-    // Cache control for GET requests on static assets
-    if (method === 'GET' && s3Response.ok) {
-      responseHeaders.set('Cache-Control', 'public, max-age=3600, s-maxage=86400');
+    // Keep browser caching conservative while letting Cloudflare edge cache more aggressively.
+    if ((method === 'GET' || method === 'HEAD') && s3Response.ok) {
+      responseHeaders.set(
+        'Cache-Control',
+        `${mode === 'inline' ? 'private' : 'public'}, max-age=${BROWSER_CACHE_TTL_SECONDS}`
+      );
+      responseHeaders.set(
+        'Cloudflare-CDN-Cache-Control',
+        `public, s-maxage=${EDGE_CACHE_TTL_SECONDS}`
+      );
     }
 
     // Force download if requested
@@ -171,11 +214,13 @@ async function handleManagementApi(request: Request, url: URL, env: Env): Promis
       s: body.secretKey,
     };
     await env.S3_CONFIGS.put(KV_PREFIX + alias, JSON.stringify(cfg));
+    setAliasConfigCache(alias, cfg);
     return json({ ok: true, alias });
   }
 
   if (request.method === 'DELETE') {
     await env.S3_CONFIGS.delete(KV_PREFIX + alias);
+    aliasConfigCache.delete(alias);
     return json({ ok: true, alias });
   }
 
@@ -195,7 +240,7 @@ async function resolveRequest(
   request: Request,
   url: URL,
   env: Env
-): Promise<{ s3Cfg: S3Cfg; bucket: string; key: string } | Response> {
+): Promise<ResolvedRequest | Response> {
   const inlineCfg = resolveInlineS3Config(request, url);
 
   if (inlineCfg) {
@@ -215,7 +260,7 @@ async function resolveRequest(
     const key = parts.slice(1).map(decodeURIComponent).join('/');
     if (!key) return json({ error: 'Object key is required' }, 400);
 
-    return { s3Cfg: inlineCfg, bucket, key };
+    return { s3Cfg: inlineCfg, bucket, key, mode: 'inline' };
   }
 
   // KV alias mode: /{alias}/{bucket}/{key} — no auth needed
@@ -225,15 +270,11 @@ async function resolveRequest(
   }
 
   const alias = decodeURIComponent(parts[0]);
-  const stored = await env.S3_CONFIGS.get(KV_PREFIX + alias);
-  if (!stored) {
+  const storedCfg = await getStoredS3Config(env, alias);
+  if (storedCfg === null) {
     return json({ error: `Unknown alias: ${alias}` }, 404);
   }
-
-  let s3Cfg: S3Cfg;
-  try {
-    s3Cfg = JSON.parse(stored);
-  } catch {
+  if (storedCfg === 'corrupted') {
     return json({ error: 'Corrupted config in KV' }, 500);
   }
 
@@ -241,7 +282,7 @@ async function resolveRequest(
   const key = parts.slice(2).map(decodeURIComponent).join('/');
   if (!key) return json({ error: 'Object key is required' }, 400);
 
-  return { s3Cfg, bucket, key };
+  return { s3Cfg: storedCfg, bucket, key, mode: 'alias' };
 }
 
 /**
@@ -271,6 +312,40 @@ function resolveInlineS3Config(request: Request, url: URL): S3Cfg | null {
   }
 
   return null;
+}
+
+async function getStoredS3Config(env: Env, alias: string): Promise<S3Cfg | 'corrupted' | null> {
+  const cached = aliasConfigCache.get(alias);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  if (cached) {
+    aliasConfigCache.delete(alias);
+  }
+
+  const stored = await env.S3_CONFIGS.get(KV_PREFIX + alias);
+  if (!stored) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(stored) as S3Cfg;
+    if (!parsed.e || !parsed.r || !parsed.a || !parsed.s) {
+      return 'corrupted';
+    }
+    setAliasConfigCache(alias, parsed);
+    return parsed;
+  } catch {
+    return 'corrupted';
+  }
+}
+
+function setAliasConfigCache(alias: string, cfg: S3Cfg): void {
+  aliasConfigCache.set(alias, {
+    value: cfg,
+    expiresAt: Date.now() + ALIAS_CACHE_TTL_MS,
+  });
 }
 
 function json(data: unknown, status = 200): Response {
