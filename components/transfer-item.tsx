@@ -25,8 +25,8 @@ import React from 'react';
 import { View, Image } from 'react-native';
 import { getFileExtension } from '@/lib/constants';
 import { t } from '@/lib/i18n';
+import { fadeIn, fadeOut } from '@/components/ui/fade-motion';
 import type { LucideIcon } from 'lucide-react-native';
-import { FadeInDown, FadeOutUp, ReduceMotion } from 'react-native-reanimated';
 
 type FileTypeInfo = { icon: LucideIcon; color: string };
 
@@ -140,9 +140,7 @@ export const TransferItem = React.memo(function TransferItem({
   }, [task, isCompleted, isFailed, isPaused]);
 
   return (
-    <NativeOnlyAnimatedView
-      entering={FadeInDown.duration(180).reduceMotion(ReduceMotion.System)}
-      exiting={FadeOutUp.duration(140).reduceMotion(ReduceMotion.System)}>
+    <NativeOnlyAnimatedView entering={fadeIn()} exiting={fadeOut()}>
       <Card className="gap-0 py-4">
         <CardContent className="gap-3 px-4">
           {/* Header row */}

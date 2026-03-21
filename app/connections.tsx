@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { fadeIn, fadeOut } from '@/components/ui/fade-motion';
 import { Icon } from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -59,13 +60,6 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { useRouter } from 'expo-router';
 import { useT } from '@/lib/i18n';
-import Animated, {
-  FadeInDown,
-  FadeInRight,
-  FadeOutUp,
-  FadeOutRight,
-  ReduceMotion,
-} from 'react-native-reanimated';
 
 const DEFAULT_CONFIG: S3Config = {
   provider: 'cloudflare-r2',
@@ -74,6 +68,7 @@ const DEFAULT_CONFIG: S3Config = {
   secretAccessKey: '',
   region: 'auto',
   accountId: '',
+  forcePathStyle: false,
 };
 
 function joinTooltipText(...parts: Array<string | null | undefined | false>): string | undefined {
@@ -359,6 +354,7 @@ export default function ConnectionsScreen() {
       endpointUrl: p.defaultEndpoint,
       accountId: '',
       visibleBuckets: undefined,
+      forcePathStyle: false,
     }));
     // Auto-fill display name if empty
     setDisplayName((prev) => (prev ? prev : p.label));
@@ -581,10 +577,7 @@ export default function ConnectionsScreen() {
   if (showForm) {
     return (
       <View className="bg-background flex-1" style={{ paddingTop: insets.top }}>
-        <Animated.View
-          className="flex-1"
-          entering={FadeInRight.duration(220).reduceMotion(ReduceMotion.System)}
-          exiting={FadeOutRight.duration(140).reduceMotion(ReduceMotion.System)}>
+        <NativeOnlyAnimatedView className="flex-1" entering={fadeIn()} exiting={fadeOut()}>
           <ScreenTransitionView className="flex-1" disabled>
             <KeyboardAwareScrollView
               className="flex-1"
@@ -837,15 +830,13 @@ export default function ConnectionsScreen() {
             <View className="mb-6 gap-2">
               <View className="flex-row items-center gap-3">
                 <Checkbox
-                  checked={formConfig.forcePathStyle !== false}
+                  checked={formConfig.forcePathStyle === true}
                   onCheckedChange={(checked) =>
                     setFormConfig((p) => ({ ...p, forcePathStyle: !!checked }))
                   }
                 />
                 <Pressable
-                  onPress={() =>
-                    setFormConfig((p) => ({ ...p, forcePathStyle: p.forcePathStyle === false }))
-                  }>
+                  onPress={() => setFormConfig((p) => ({ ...p, forcePathStyle: !p.forcePathStyle }))}>
                   <View className="flex-row items-center gap-1.5">
                     <Label>{t('form.pathStyle')}</Label>
                   </View>
@@ -1006,7 +997,7 @@ export default function ConnectionsScreen() {
           </View>
             </KeyboardAwareScrollView>
           </ScreenTransitionView>
-        </Animated.View>
+        </NativeOnlyAnimatedView>
       </View>
     );
   }
@@ -1075,9 +1066,7 @@ export default function ConnectionsScreen() {
 
         {/* Import result banner */}
         {importResult && (
-          <NativeOnlyAnimatedView
-            entering={FadeInDown.duration(180).reduceMotion(ReduceMotion.System)}
-            exiting={FadeOutUp.duration(140).reduceMotion(ReduceMotion.System)}>
+          <NativeOnlyAnimatedView entering={fadeIn()} exiting={fadeOut()}>
             <View
               className={`mb-3 rounded-lg p-3 ${
                 importResult.success ? 'bg-green-500/10' : 'bg-destructive/10'

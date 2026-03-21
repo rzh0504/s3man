@@ -1,4 +1,5 @@
 import { Checkbox } from '@/components/ui/checkbox';
+import { fadeIn } from '@/components/ui/fade-motion';
 import { Icon } from '@/components/ui/icon';
 import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
 import { ScreenTransitionView } from '@/components/ui/screen-transition-view';
@@ -25,13 +26,11 @@ import * as React from 'react';
 import { View, ScrollView, Pressable, Alert, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
-  FadeInDown,
   useSharedValue,
   useAnimatedStyle,
   withTiming,
   withSequence,
   Easing,
-  ReduceMotion,
 } from 'react-native-reanimated';
 import { Uniwind, useUniwind } from 'uniwind';
 import { useRouter } from 'expo-router';
@@ -131,9 +130,12 @@ export default function ConfigScreen() {
     <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
       {/* Header */}
       <View className="px-6 pt-4 pb-3">
-        <View className="flex-row items-center gap-2.5">
-          <Icon as={SettingsIcon} className="text-foreground size-6" />
-          <Text className="text-foreground text-xl font-bold">{t('settings.title')}</Text>
+        <View className="flex-row items-center justify-between gap-3">
+          <View className="flex-row items-center gap-2.5">
+            <Icon as={SettingsIcon} className="text-foreground size-6" />
+            <Text className="text-foreground text-xl font-bold">{t('settings.title')}</Text>
+          </View>
+          <View className="size-9" />
         </View>
       </View>
 
@@ -141,8 +143,7 @@ export default function ConfigScreen() {
 
       <ScrollView className="flex-1" contentContainerClassName="px-6 pb-12 pt-3">
         {/* ── Connections ─────────────────────────────────────────────── */}
-        <NativeOnlyAnimatedView
-          entering={FadeInDown.duration(200).reduceMotion(ReduceMotion.System)}>
+        <NativeOnlyAnimatedView entering={fadeIn()}>
           <View className="border-border bg-card rounded-xl border">
             <Pressable
               onPress={() => router.push('/connections' as any)}
@@ -172,8 +173,7 @@ export default function ConfigScreen() {
           <Text className="text-foreground text-lg font-semibold">{t('settings.general')}</Text>
         </View>
 
-        <NativeOnlyAnimatedView
-          entering={FadeInDown.duration(220).delay(60).reduceMotion(ReduceMotion.System)}>
+        <NativeOnlyAnimatedView entering={fadeIn(40)}>
           <View className="border-border bg-card rounded-xl border">
             {/* Theme */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">

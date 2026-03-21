@@ -21,10 +21,9 @@ export function ScreenTransitionView({
   children,
   style,
   disabled = false,
-  hiddenOpacity = 0.84,
-  offset = 10,
-  enterDuration = 220,
-  exitDuration = 140,
+  hiddenOpacity = 0,
+  enterDuration = 160,
+  exitDuration = 110,
   ...props
 }: ScreenTransitionViewProps) {
   const isFocused = useIsFocused();
@@ -39,7 +38,7 @@ export function ScreenTransitionView({
 
     progress.value = withTiming(isFocused ? 1 : 0, {
       duration: isFocused ? enterDuration : exitDuration,
-      easing: isFocused ? Easing.out(Easing.cubic) : Easing.out(Easing.quad),
+      easing: Easing.out(Easing.quad),
       reduceMotion: ReduceMotion.System,
     });
   }, [disabled, enterDuration, exitDuration, isFocused, prefersReducedMotion, progress]);
@@ -50,12 +49,8 @@ export function ScreenTransitionView({
         disabled || prefersReducedMotion
           ? 1
           : hiddenOpacity + (1 - hiddenOpacity) * progress.value,
-      transform:
-        disabled || prefersReducedMotion
-          ? [{ translateY: 0 }]
-          : [{ translateY: (1 - progress.value) * offset }],
     }),
-    [disabled, hiddenOpacity, offset, prefersReducedMotion]
+    [disabled, hiddenOpacity, prefersReducedMotion]
   );
 
   return (

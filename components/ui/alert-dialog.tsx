@@ -1,3 +1,4 @@
+import { fadeIn, fadeOut } from '@/components/ui/fade-motion';
 import { buttonTextVariants, buttonVariants, type ButtonProps } from '@/components/ui/button';
 import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
 import { TextClassContext } from '@/components/ui/text';
@@ -6,7 +7,6 @@ import * as AlertDialogPrimitive from '@rn-primitives/alert-dialog';
 import type { VariantProps } from 'class-variance-authority';
 import * as React from 'react';
 import { Platform, View, type ViewProps } from 'react-native';
-import { FadeIn, FadeOut } from 'react-native-reanimated';
 import { FullWindowOverlay as RNFullWindowOverlay } from 'react-native-screens';
 
 const AlertDialog = AlertDialogPrimitive.Root;
@@ -36,9 +36,7 @@ function AlertDialogOverlay({
           className
         )}
         {...props}>
-        <NativeOnlyAnimatedView
-          entering={FadeIn.duration(200).delay(50)}
-          exiting={FadeOut.duration(150)}>
+        <NativeOnlyAnimatedView entering={fadeIn(40)} exiting={fadeOut()}>
           <>{children}</>
         </NativeOnlyAnimatedView>
       </AlertDialogPrimitive.Overlay>

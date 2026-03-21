@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import { useIsFocused } from '@react-navigation/native';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +25,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { fadeIn, fadeOut } from '@/components/ui/fade-motion';
 import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
 import { ScreenTransitionView } from '@/components/ui/screen-transition-view';
 import { BucketItem } from '@/components/bucket-item';
@@ -34,7 +36,6 @@ import * as S3Service from '@/lib/s3-service';
 import { getProvider } from '@/lib/constants';
 import type { BucketInfo, S3Connection } from '@/lib/types';
 import { ProviderIcon } from '@/components/provider-icons';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   FolderIcon,
   PlusIcon,
@@ -53,21 +54,18 @@ import {
   ActivityIndicator,
   Pressable,
   Alert,
+  Platform,
+  ToastAndroid,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
-  FadeIn,
-  FadeInDown,
-  FadeOut,
-  FadeOutUp,
-  ReduceMotion,
-  StretchInY,
-  StretchOutY,
+  Easing,
   useAnimatedStyle,
+  useSharedValue,
   withTiming,
-  LinearTransition,
 } from 'react-native-reanimated';
 import { useT } from '@/lib/i18n';
 
@@ -75,6 +73,10 @@ interface ProviderSection {
   connection: S3Connection;
   buckets: BucketInfo[];
 }
+
+const TAB_TIMING_CONFIG = { duration: 180, easing: Easing.out(Easing.quad) };
+const TAB_CONTAINER_PADDING = 3;
+const TAB_GAP = 4;
 
 /** Skeleton placeholder shown while buckets load for the first time */
 function BucketListSkeleton() {
@@ -122,11 +124,8 @@ function ProviderSectionCard({
 
   return (
     <Animated.View
-      layout={LinearTransition.duration(220).reduceMotion(ReduceMotion.System)}
-      entering={FadeInDown.duration(200)
-        .delay(Math.min(index * 40, 160))
-        .reduceMotion(ReduceMotion.System)}
-      exiting={FadeOutUp.duration(140).reduceMotion(ReduceMotion.System)}
+      entering={fadeIn(Math.min(index * 30, 120))}
+      exiting={fadeOut()}
       className="border-border bg-card mx-4 mb-3 overflow-hidden rounded-xl border">
       {/* Header — always visible */}
       <Pressable
@@ -159,15 +158,9 @@ function ProviderSectionCard({
 
       {/* Bucket list — collapsible */}
       {!collapsed && (
-        <NativeOnlyAnimatedView
-          entering={StretchInY.duration(220)
-            .reduceMotion(ReduceMotion.System)}
-          exiting={StretchOutY.duration(180)
-            .reduceMotion(ReduceMotion.System)}>
+        <NativeOnlyAnimatedView entering={fadeIn()} exiting={fadeOut()}>
           <Separator />
-          <Animated.View
-            entering={FadeIn.duration(140).delay(40).reduceMotion(ReduceMotion.System)}
-            exiting={FadeOut.duration(90).reduceMotion(ReduceMotion.System)}>
+          <Animated.View entering={fadeIn(40)} exiting={fadeOut()}>
             {section.buckets.length === 0 ? (
               <View className="items-center py-6">
                 <Text className="text-muted-foreground text-sm">{t('buckets.noBuckets')}</Text>
@@ -196,6 +189,7 @@ export default function BucketIndexScreen() {
   const insets = useSafeAreaInsets();
   const t = useT();
   const connections = useConnectionStore((s) => s.connections);
+  const setVisibleBuckets = useConnectionStore((s) => s.setVisibleBuckets);
   const isInitializing = useConnectionStore((s) => s.isInitializing);
   const { buckets, isLoading, hasCachedData, setBucketsForConnection, setLoading } =
     useBucketStore();
@@ -206,11 +200,44 @@ export default function BucketIndexScreen() {
   const [createError, setCreateError] = React.useState('');
   const [createForConnectionId, setCreateForConnectionId] = React.useState<string | null>(null);
   const [initialLoaded, setInitialLoaded] = React.useState(false);
-  const [collapsedIds, setCollapsedIds] = React.useState<Set<string> | 'all'>('all');
+  const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
+  const isFocused = useIsFocused();
 
   // Delete bucket state
   const [deleteBucketTarget, setDeleteBucketTarget] = React.useState<BucketInfo | null>(null);
   const [isDeletingBucket, setIsDeletingBucket] = React.useState(false);
+
+  const showSystemToast = React.useCallback((message: string) => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('', message);
+  }, []);
+
+  const getReadableCreateBucketError = React.useCallback(
+    (error: unknown) => {
+      const rawMessage =
+        error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+
+      if (
+        /access\s*denied|forbidden|unauthorized|not\s*authorized|permission/i.test(rawMessage)
+      ) {
+        return t('buckets.createFailedPermission');
+      }
+
+      if (
+        /not\s*implemented|unsupported|method\s*not\s*allowed|501|operation\s*not\s*supported/i.test(
+          rawMessage
+        )
+      ) {
+        return t('buckets.createFailedUnsupported');
+      }
+
+      return rawMessage || t('buckets.createFailedDesc');
+    },
+    [t]
+  );
 
   const connectedList = React.useMemo(
     () => connections.filter((c) => c.status === 'connected'),
@@ -251,14 +278,12 @@ export default function BucketIndexScreen() {
 
   // Unique provider types from connected/displayed connections
   const providerTabs = React.useMemo(() => {
-    const seen = new Map<S3Provider, string>();
+    const seen = new Set<S3Provider>();
     for (const s of sections) {
       const p = s.connection.config.provider;
-      if (!seen.has(p)) {
-        seen.set(p, getProvider(p).label);
-      }
+      seen.add(p);
     }
-    return Array.from(seen, ([key, label]) => ({ key, label }));
+    return Array.from(seen, (key) => ({ key }));
   }, [sections]);
 
   // Reset to "all" when the active provider no longer has connections
@@ -275,18 +300,45 @@ export default function BucketIndexScreen() {
         : sections.filter((s) => s.connection.config.provider === activeProvider),
     [sections, activeProvider]
   );
+  const tabOptions = React.useMemo(() => ['all', ...providerTabs.map((tab) => tab.key)], [providerTabs]);
+  const [tabLayouts, setTabLayouts] = React.useState<Record<string, { x: number; width: number }>>({});
+  const indicatorOffset = useSharedValue(0);
+  const indicatorWidth = useSharedValue(0);
+  const activeTabLayout = tabLayouts[activeProvider];
+
+  React.useLayoutEffect(() => {
+    if (isFocused) {
+      setExpandedIds(new Set());
+    }
+  }, [isFocused]);
+
+  React.useEffect(() => {
+    if (!activeTabLayout) return;
+    indicatorOffset.value = withTiming(activeTabLayout.x, TAB_TIMING_CONFIG);
+    indicatorWidth.value = withTiming(activeTabLayout.width, TAB_TIMING_CONFIG);
+  }, [activeTabLayout, indicatorOffset, indicatorWidth]);
+
+  const handleTabLayout = React.useCallback((tab: string, event: LayoutChangeEvent) => {
+    const { x, width } = event.nativeEvent.layout;
+    setTabLayouts((prev) => {
+      const current = prev[tab];
+      if (current && current.x === x && current.width === width) {
+        return prev;
+      }
+      return { ...prev, [tab]: { x, width } };
+    });
+  }, []);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    width: indicatorWidth.value,
+    transform: [{ translateX: indicatorOffset.value }],
+  }));
 
   // ── Collapse / Expand ──────────────────────────────────────────────────
 
   const toggleCollapse = React.useCallback(
     (id: string) => {
-      setCollapsedIds((prev) => {
-        if (prev === 'all') {
-          // All collapsed — expand this one (collapse the rest)
-          const allIds = new Set(connectedList.map((c) => c.id));
-          allIds.delete(id);
-          return allIds;
-        }
+      setExpandedIds((prev) => {
         const next = new Set(prev);
         if (next.has(id)) {
           next.delete(id);
@@ -370,18 +422,38 @@ export default function BucketIndexScreen() {
     if (!newBucketName.trim() || !createForConnectionId) return;
     setIsCreating(true);
     setCreateError('');
+    const bucketName = newBucketName.trim();
     try {
-      await S3Service.createBucket(createForConnectionId, newBucketName.trim());
+      await S3Service.createBucket(createForConnectionId, bucketName);
       setNewBucketName('');
       setShowCreateDialog(false);
       const result = await S3Service.listBuckets(createForConnectionId);
       setBucketsForConnection(createForConnectionId, result);
+      const connection = connections.find((conn) => conn.id === createForConnectionId);
+      if (connection?.config.visibleBuckets) {
+        const nextVisibleBuckets = Array.from(
+          new Set([...connection.config.visibleBuckets, bucketName])
+        );
+        await setVisibleBuckets(createForConnectionId, nextVisibleBuckets);
+      }
+      showSystemToast(t('buckets.createSuccess', { name: bucketName }));
     } catch (error: any) {
-      setCreateError(error.message || 'Failed to create bucket');
+      const message = getReadableCreateBucketError(error);
+      setCreateError('');
+      showSystemToast(message);
     } finally {
       setIsCreating(false);
     }
-  }, [newBucketName, createForConnectionId, setBucketsForConnection]);
+  }, [
+    newBucketName,
+    createForConnectionId,
+    connections,
+    setBucketsForConnection,
+    setVisibleBuckets,
+    getReadableCreateBucketError,
+    showSystemToast,
+    t,
+  ]);
 
   const handleBucketPress = React.useCallback(
     (bucket: BucketInfo) => {
@@ -404,6 +476,17 @@ export default function BucketIndexScreen() {
       // Refresh bucket list for that connection
       const result = await S3Service.listBuckets(deleteBucketTarget.connectionId);
       setBucketsForConnection(deleteBucketTarget.connectionId, result);
+      const connection = connections.find((conn) => conn.id === deleteBucketTarget.connectionId);
+      if (connection?.config.visibleBuckets) {
+        const nextVisibleBuckets = connection.config.visibleBuckets.filter(
+          (name) => name !== deleteBucketTarget.name
+        );
+        await setVisibleBuckets(
+          deleteBucketTarget.connectionId,
+          nextVisibleBuckets.length > 0 ? nextVisibleBuckets : undefined
+        );
+      }
+      showSystemToast(t('buckets.deleteSuccess', { name: deleteBucketTarget.name }));
       setDeleteBucketTarget(null);
     } catch (error: any) {
       Alert.alert(t('buckets.deleteFailed'), error.message || t('buckets.deleteFailedDesc'));
@@ -411,7 +494,7 @@ export default function BucketIndexScreen() {
     } finally {
       setIsDeletingBucket(false);
     }
-  }, [deleteBucketTarget, setBucketsForConnection]);
+  }, [deleteBucketTarget, connections, setBucketsForConnection, setVisibleBuckets, showSystemToast, t]);
 
   // ── No connections at all ──────────────────────────────────────────────
   // Show skeleton while store is still loading from SecureStore
@@ -497,26 +580,50 @@ export default function BucketIndexScreen() {
       <Separator />
 
       {/* Provider Tabs + Grouped Bucket Sections */}
-      <Tabs value={activeProvider} onValueChange={setActiveProvider} className="flex-1">
+      <View className="flex-1">
         {providerTabs.length > 1 && (
-          <View className="px-4 pt-3">
-            <TabsList className="h-10">
-              <TabsTrigger value="all" className="px-3.5 py-1.5">
-                <Icon
-                  as={DatabaseIcon}
-                  className={cn('size-5', activeProvider !== 'all' && 'opacity-40')}
-                />
-              </TabsTrigger>
-              {providerTabs.map((tab) => (
-                <TabsTrigger key={tab.key} value={tab.key} className="px-3.5 py-1.5">
-                  <ProviderIcon
-                    provider={tab.key as S3Provider}
-                    size={20}
-                    color={activeProvider !== tab.key ? 'hsl(0, 0%, 60%)' : undefined}
-                  />
-                </TabsTrigger>
-              ))}
-            </TabsList>
+          <View
+            className="bg-muted relative mx-4 mt-3 self-start rounded-lg"
+            style={{ padding: TAB_CONTAINER_PADDING }}>
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                indicatorStyle,
+                { opacity: activeTabLayout ? 1 : 0 },
+                {
+                  position: 'absolute',
+                  left: TAB_CONTAINER_PADDING,
+                  top: TAB_CONTAINER_PADDING,
+                  bottom: TAB_CONTAINER_PADDING,
+                },
+              ]}
+              className="bg-background dark:border-foreground/10 dark:bg-input/30 rounded-md border border-transparent shadow-sm shadow-black/5"
+            />
+            <View className="flex-row gap-1">
+              {tabOptions.map((tab) => {
+                const isActive = activeProvider === tab;
+                return (
+                  <View key={tab} onLayout={(event) => handleTabLayout(tab, event)}>
+                    <Pressable
+                      onPress={() => setActiveProvider(tab)}
+                      className="items-center justify-center rounded-md px-3.5 py-1.5">
+                      {tab === 'all' ? (
+                        <Icon
+                          as={DatabaseIcon}
+                          className={cn('size-5', !isActive && 'opacity-40')}
+                        />
+                      ) : (
+                        <ProviderIcon
+                          provider={tab as S3Provider}
+                          size={20}
+                          color={!isActive ? 'hsl(0, 0%, 60%)' : undefined}
+                        />
+                      )}
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
           </View>
         )}
 
@@ -539,7 +646,7 @@ export default function BucketIndexScreen() {
                 key={section.connection.id}
                 index={index}
                 section={section}
-                collapsed={collapsedIds === 'all' || collapsedIds.has(section.connection.id)}
+                collapsed={!expandedIds.has(section.connection.id)}
                 onToggle={() => toggleCollapse(section.connection.id)}
                 onBucketPress={handleBucketPress}
                 onCreateBucket={openCreateDialog}
@@ -548,7 +655,7 @@ export default function BucketIndexScreen() {
             ))
           )}
         </ScrollView>
-      </Tabs>
+      </View>
 
       {/* Create Bucket Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
