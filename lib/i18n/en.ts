@@ -34,7 +34,14 @@ export default {
   'buckets.deleting': 'Deleting...',
   'buckets.deleteFailed': 'Delete Failed',
   'buckets.deleteFailedDesc': 'Failed to delete bucket. Make sure the bucket is empty.',
+  'buckets.deleteSuccess': 'Deleted bucket: {name}',
   'buckets.createFailed': 'Failed to create bucket',
+  'buckets.createFailedDesc': 'Failed to create bucket. Please try again.',
+  'buckets.createFailedPermission':
+    'Failed to create bucket: this connection does not have permission to create buckets.',
+  'buckets.createFailedUnsupported':
+    'Failed to create bucket: this provider or endpoint does not support bucket creation.',
+  'buckets.createSuccess': 'Created bucket: {name}',
   'buckets.created': 'Created {date}',
 
   // ── Settings / Config ──────────────────────────────────────────────────

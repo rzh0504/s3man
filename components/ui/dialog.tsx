@@ -1,3 +1,4 @@
+import { fadeIn, fadeOut } from '@/components/ui/fade-motion';
 import { Icon } from '@/components/ui/icon';
 import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
 import { cn } from '@/lib/utils';
@@ -5,7 +6,6 @@ import * as DialogPrimitive from '@rn-primitives/dialog';
 import { X } from 'lucide-react-native';
 import * as React from 'react';
 import { Platform, Text, View, type ViewProps } from 'react-native';
-import { FadeIn, FadeOut } from 'react-native-reanimated';
 import { FullWindowOverlay as RNFullWindowOverlay } from 'react-native-screens';
 
 const Dialog = DialogPrimitive.Root;
@@ -38,8 +38,8 @@ function DialogOverlay({
         )}
         {...props}
         asChild={Platform.OS !== 'web'}>
-        <NativeOnlyAnimatedView entering={FadeIn.duration(200)} exiting={FadeOut.duration(150)}>
-          <NativeOnlyAnimatedView entering={FadeIn.delay(50)} exiting={FadeOut.duration(150)}>
+        <NativeOnlyAnimatedView entering={fadeIn()} exiting={fadeOut()}>
+          <NativeOnlyAnimatedView entering={fadeIn(40)} exiting={fadeOut()}>
             <>{children}</>
           </NativeOnlyAnimatedView>
         </NativeOnlyAnimatedView>

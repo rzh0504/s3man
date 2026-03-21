@@ -32,6 +32,9 @@ interface ConnectionState {
   /** Update an existing connection's config (re-tests, auto-saves) */
   updateConnection: (id: string, displayName: string, config: S3Config) => Promise<void>;
 
+  /** Update only the visible bucket whitelist without reconnecting */
+  setVisibleBuckets: (id: string, visibleBuckets?: string[]) => Promise<void>;
+
   /** Remove a connection (destroys client, auto-saves) */
   removeConnection: (id: string) => Promise<void>;
 
@@ -172,6 +175,24 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
 
     // Re-register proxy alias in Worker KV (best-effort, non-blocking)
     S3Service.registerProxyAlias(id).catch(() => {});
+  },
+
+  setVisibleBuckets: async (id, visibleBuckets) => {
+    set((state) => ({
+      connections: state.connections.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              config: {
+                ...c.config,
+                visibleBuckets,
+              },
+            }
+          : c
+      ),
+    }));
+
+    await _persist(get().connections);
   },
 
   removeConnection: async (id) => {

@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import { fadeIn, fadeOut } from '@/components/ui/fade-motion';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
@@ -78,7 +79,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { FadeInDown, FadeOutDown, FadeOutUp, ReduceMotion } from 'react-native-reanimated';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -906,9 +906,7 @@ export default function ObjectBrowserScreen() {
 
       {/* Upload Progress Overlay */}
       {uploadProgress && (
-        <NativeOnlyAnimatedView
-          entering={FadeInDown.duration(180).reduceMotion(ReduceMotion.System)}
-          exiting={FadeOutDown.duration(140).reduceMotion(ReduceMotion.System)}>
+        <NativeOnlyAnimatedView entering={fadeIn()} exiting={fadeOut()}>
           <View
             className="border-border bg-background/95 absolute right-0 left-0 border-t px-4 py-3"
             style={{ bottom: 70 + Math.max(insets.bottom, 12) }}>
@@ -940,9 +938,7 @@ export default function ObjectBrowserScreen() {
 
       {/* Bottom Action Bar */}
       {selectedCount > 0 && (
-        <NativeOnlyAnimatedView
-          entering={FadeInDown.duration(180).reduceMotion(ReduceMotion.System)}
-          exiting={FadeOutDown.duration(140).reduceMotion(ReduceMotion.System)}>
+        <NativeOnlyAnimatedView entering={fadeIn()} exiting={fadeOut()}>
           <View
             className="border-border bg-background absolute right-0 bottom-0 left-0 border-t px-4 py-3"
             style={{ paddingBottom: Math.max(insets.bottom, 12) }}>
@@ -974,9 +970,7 @@ export default function ObjectBrowserScreen() {
 
       {/* FAB backdrop */}
       {fabExpanded && (
-        <NativeOnlyAnimatedView
-          entering={FadeInDown.duration(160).reduceMotion(ReduceMotion.System)}
-          exiting={FadeOutDown.duration(120).reduceMotion(ReduceMotion.System)}>
+        <NativeOnlyAnimatedView entering={fadeIn()} exiting={fadeOut()}>
           <Pressable
             onPress={() => setFabExpanded(false)}
             className="absolute inset-0"
@@ -993,9 +987,7 @@ export default function ObjectBrowserScreen() {
             bottom: 24 + Math.max(insets.bottom, 12),
           }}>
           {fabExpanded && (
-            <NativeOnlyAnimatedView
-              entering={FadeInDown.duration(180).reduceMotion(ReduceMotion.System)}
-              exiting={FadeOutUp.duration(120).reduceMotion(ReduceMotion.System)}>
+            <NativeOnlyAnimatedView entering={fadeIn()} exiting={fadeOut()}>
               <View className="items-end gap-3">
                 <Pressable
                   onPress={() => {

@@ -34,7 +34,12 @@ export default {
   'buckets.deleting': '删除中...',
   'buckets.deleteFailed': '删除失败',
   'buckets.deleteFailedDesc': '删除存储桶失败，请确保存储桶为空。',
+  'buckets.deleteSuccess': '已删除存储桶：{name}',
   'buckets.createFailed': '创建存储桶失败',
+  'buckets.createFailedDesc': '创建存储桶失败，请稍后重试。',
+  'buckets.createFailedPermission': '创建存储桶失败：当前连接没有创建存储桶权限。',
+  'buckets.createFailedUnsupported': '创建存储桶失败：当前服务或接口不支持直接创建存储桶。',
+  'buckets.createSuccess': '已创建存储桶：{name}',
   'buckets.created': '创建于 {date}',
 
   // ── 设置 ───────────────────────────────────────────────────────────────
