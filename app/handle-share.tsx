@@ -22,7 +22,12 @@ import * as React from 'react';
 import { View, ScrollView, Pressable, ActivityIndicator, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
-import { getSharedPayloads } from 'expo-sharing';
+import {
+  getResolvedSharedPayloadsAsync,
+  getSharedPayloads,
+  type ResolvedSharePayload,
+  type SharePayload,
+} from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useT } from '@/lib/i18n';
 
@@ -34,7 +39,8 @@ function generateId(): string {
 
 function getFileName(uri: string): string {
   const decoded = decodeURIComponent(uri);
-  const segments = decoded.split('/');
+  const cleanUri = decoded.split(/[?#]/, 1)[0];
+  const segments = cleanUri.split('/');
   return segments[segments.length - 1] || 'shared-file';
 }
 
@@ -73,6 +79,28 @@ function ensureFileNameExtension(name: string, mimeType?: string): string {
   if (name.includes('.')) return name;
   const ext = getExtensionForMimeType(mimeType);
   return ext ? `${name}.${ext}` : name;
+}
+
+function isFileSharePayload(payload: Pick<SharePayload, 'value' | 'shareType'>): boolean {
+  return !!payload.value && payload.shareType !== 'text' && payload.shareType !== 'url';
+}
+
+function getSharePayloadKey(payload: Pick<SharePayload, 'value' | 'shareType' | 'mimeType'>): string {
+  return `${payload.value}|${payload.shareType}|${payload.mimeType ?? ''}`;
+}
+
+function toSharedFile(payload: SharePayload, resolved?: ResolvedSharePayload): SharedFile {
+  const uri = resolved?.contentUri || payload.value;
+  const mimeType = resolved?.contentMimeType || payload.mimeType;
+  const rawName = resolved?.originalName || getFileName(uri);
+
+  return {
+    uri,
+    name: ensureFileNameExtension(sanitizeFileName(rawName), mimeType),
+    size: resolved?.contentSize ?? undefined,
+    mimeType,
+    shareType: payload.shareType,
+  };
 }
 
 function getContentIcon(type?: string) {
@@ -223,23 +251,49 @@ export default function HandleShareScreen() {
 
   // ── Load shared payloads ─────────────────────────────────────────────
   React.useEffect(() => {
-    try {
-      const payloads = getSharedPayloads();
-      const files: SharedFile[] = payloads
-        .filter((p) => p.value && p.shareType !== 'text' && p.shareType !== 'url')
-        .map((p) => ({
-          uri: p.value!,
-          name: getFileName(p.value!),
-          mimeType: p.mimeType,
-          shareType: p.shareType,
-        }));
-      setSharedFiles(files);
-      setFileStates(files.map((f) => ({ file: f, status: 'idle', progress: 0 })));
-    } catch (e) {
-      console.error('Failed to get shared payloads:', e);
-    } finally {
-      setLoading(false);
-    }
+    let cancelled = false;
+
+    const loadSharedFiles = async () => {
+      try {
+        const payloads = getSharedPayloads().filter(isFileSharePayload);
+        const resolvedByKey = new Map<string, ResolvedSharePayload[]>();
+
+        try {
+          const resolvedPayloads = (await getResolvedSharedPayloadsAsync()).filter(isFileSharePayload);
+          resolvedPayloads.forEach((payload) => {
+            const key = getSharePayloadKey(payload);
+            const existing = resolvedByKey.get(key) ?? [];
+            existing.push(payload);
+            resolvedByKey.set(key, existing);
+          });
+        } catch (error) {
+          console.warn('Failed to resolve shared payload metadata:', error);
+        }
+
+        const files = payloads.map((payload) => {
+          const key = getSharePayloadKey(payload);
+          const resolvedPayload = resolvedByKey.get(key)?.shift();
+          return toSharedFile(payload, resolvedPayload);
+        });
+
+        if (cancelled) return;
+
+        setSharedFiles(files);
+        setFileStates(files.map((f) => ({ file: f, status: 'idle', progress: 0 })));
+      } catch (e) {
+        console.error('Failed to get shared payloads:', e);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadSharedFiles();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Auto-select first connected connection
