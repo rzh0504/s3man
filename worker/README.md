@@ -41,7 +41,13 @@ wrangler kv namespace create S3_CONFIGS
 ⛅ Created namespace "s3man-proxy-S3_CONFIGS" with id "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
-复制 `id` 值，填入 `wrangler.toml`：
+先复制示例配置：
+
+```bash
+cp wrangler.example.toml wrangler.toml
+```
+
+然后把 `id` 值填入本地的 `wrangler.toml`：
 
 ```toml
 [[kv_namespaces]]
@@ -76,7 +82,9 @@ wrangler secret put AUTH_TOKEN
 
 ## 6.（可选）绑定自定义域名
 
-编辑 `wrangler.toml`，取消注释并修改：
+如果你希望路由和自定义域名都由 Cloudflare Dashboard 管理，这一步可以跳过，并保持本地 `wrangler.toml` 不包含 `routes`，同时设置 `workers_dev = false`。
+
+如果你希望由 `wrangler deploy` 一并管理，才编辑本地的 `wrangler.toml`，取消注释并修改：
 
 ```toml
 routes = [
