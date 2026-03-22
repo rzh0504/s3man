@@ -42,12 +42,29 @@ jobs:
       - name: Generate Android project
         run: pnpm exec expo prebuild --platform android --non-interactive
 
+      - name: Tune Gradle for CI
+        working-directory: android
+        shell: bash
+        run: |
+          sed -i '/^org\.gradle\.jvmargs=/d' gradle.properties
+          sed -i '/^org\.gradle\.daemon=/d' gradle.properties
+          sed -i '/^org\.gradle\.parallel=/d' gradle.properties
+          sed -i '/^org\.gradle\.workers\.max=/d' gradle.properties
+          sed -i '/^kotlin\.daemon\.jvmargs=/d' gradle.properties
+          {
+            echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8"
+            echo "org.gradle.daemon=false"
+            echo "org.gradle.parallel=false"
+            echo "org.gradle.workers.max=2"
+            echo "kotlin.daemon.jvmargs=-Xmx2g"
+          } >> gradle.properties
+
       - name: Build release APK
         working-directory: android
         shell: bash
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease --stacktrace
+          ./gradlew assembleRelease --stacktrace --no-daemon
 
       - name: Upload APK to GitHub release
         run: pnpm upload:github -- --path android/app/build/outputs/apk/release/app-release.apk --tag "${{ github.ref_name }}" --name "s3man-${{ github.ref_name }}.apk"
