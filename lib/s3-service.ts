@@ -251,6 +251,14 @@ export async function listObjects(
   return objects;
 }
 
+export function getCachedObjectList(
+  connectionId: string,
+  bucket: string,
+  prefix: string = ''
+): S3Object[] | undefined {
+  return objectListCache.get(objectListCacheKey(connectionId, bucket, prefix));
+}
+
 /** Force-refresh listObjects bypassing cache */
 export async function listObjectsFresh(
   connectionId: string,

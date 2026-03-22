@@ -11,6 +11,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useUniwind } from 'uniwind';
 import { useConnectionStore } from '@/lib/stores/connection-store';
 import { useBucketStore } from '@/lib/stores/bucket-store';
+import { useObjectStore } from '@/lib/stores/object-store';
 import { useSettingsStore } from '@/lib/stores/settings-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
 import { useEffect } from 'react';
@@ -25,6 +26,7 @@ export default function RootLayout() {
   const { theme } = useUniwind();
   const loadConnections = useConnectionStore((s) => s.loadConnections);
   const loadCachedBuckets = useBucketStore((s) => s.loadCachedBuckets);
+  const prewarmRecentObjects = useObjectStore((s) => s.prewarmRecentObjects);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const loadTransfers = useTransferStore((s) => s.loadTasks);
 
@@ -32,10 +34,15 @@ export default function RootLayout() {
     const bootstrap = async () => {
       await loadSettings();
       await Promise.all([loadCachedBuckets(), loadConnections(), loadTransfers()]);
+      const connectionIds = useConnectionStore
+        .getState()
+        .connections.filter((connection) => connection.status === 'connected')
+        .map((connection) => connection.id);
+      void prewarmRecentObjects(connectionIds);
     };
 
     void bootstrap();
-  }, [loadConnections, loadCachedBuckets, loadSettings, loadTransfers]);
+  }, [loadConnections, loadCachedBuckets, loadSettings, loadTransfers, prewarmRecentObjects]);
 
   return (
     <KeyboardProvider>

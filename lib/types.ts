@@ -52,6 +52,32 @@ export interface S3Object {
   isFolder: boolean;
 }
 
+export interface ObjectCacheSnapshot {
+  connectionId: string;
+  bucket: string;
+  prefix: string;
+  cachedAt: string;
+  itemCount: number;
+  objects: S3Object[];
+}
+
+export interface RecentObjectCacheEntry {
+  connectionId: string;
+  bucket: string;
+  prefix: string;
+  fileName: string;
+  cachedAt: string;
+  lastAccessedAt: string;
+  itemCount: number;
+  sizeBytes: number;
+}
+
+export interface ObjectCacheManifest {
+  version: 1;
+  updatedAt: string;
+  entries: RecentObjectCacheEntry[];
+}
+
 // 传输类型
 export type TransferType = 'upload' | 'download';
 
