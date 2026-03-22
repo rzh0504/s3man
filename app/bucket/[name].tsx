@@ -25,7 +25,6 @@ import { InfoTooltip } from '@/components/info-tooltip';
 import { useObjectStore } from '@/lib/stores/object-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
 import * as S3Service from '@/lib/s3-service';
-import { Skeleton } from '@/components/ui/skeleton';
 import { formatBytes } from '@/lib/constants';
 import {
   DownloadIcon,
@@ -52,6 +51,7 @@ import {
   BackHandler,
   Alert,
   ToastAndroid,
+  type ViewToken,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -84,24 +84,6 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
-/** Skeleton placeholder for the object list while initial data loads */
-function ObjectListSkeleton() {
-  return (
-    <View className="px-4 py-2">
-      {Array.from({ length: 8 }).map((_, i) => (
-        <View key={i} className="flex-row items-center gap-3 py-3">
-          <Skeleton className="size-6 rounded" />
-          <View className="flex-1 gap-1.5">
-            <Skeleton className="h-4 w-3/4 rounded" />
-            <Skeleton className="h-3 w-1/3 rounded" />
-          </View>
-          <Skeleton className="h-3 w-12 rounded" />
-        </View>
-      ))}
-    </View>
-  );
-}
-
 export default function ObjectBrowserScreen() {
   const { name: bucketName, connectionId } = useLocalSearchParams<{
     name: string;
@@ -112,6 +94,8 @@ export default function ObjectBrowserScreen() {
   const insets = useSafeAreaInsets();
   const t = useT();
   const {
+    currentConnectionId,
+    currentBucket,
     currentPrefix,
     objects,
     selectedKeys,
@@ -119,7 +103,9 @@ export default function ObjectBrowserScreen() {
     setCurrentBucket,
     setCurrentPrefix,
     setObjects,
+    hasPrefixCache,
     loadCachedObjects,
+    clearBucketSnapshots,
     setLoading,
     toggleSelection,
     selectAll,
@@ -203,6 +189,7 @@ export default function ObjectBrowserScreen() {
 
   // Thumbnail presigned URLs cache
   const [thumbnailUrls, setThumbnailUrls] = React.useState<Record<string, string>>({});
+  const [visibleImageKeys, setVisibleImageKeys] = React.useState<string[]>([]);
   const showThumbnails = useSettingsStore((s) => s.showThumbnails);
   const downloadDirectoryUri = useSettingsStore((s) => s.downloadDirectoryUri);
   const downloadDirectoryName = useSettingsStore((s) => s.downloadDirectoryName);
@@ -223,51 +210,55 @@ export default function ObjectBrowserScreen() {
   const fileCount = objects.filter((o) => !o.isFolder).length;
 
   React.useEffect(() => {
-    if (bucketName) {
-      setCurrentBucket(bucketName);
+    if (bucketName && connectionId) {
+      setCurrentBucket(connectionId, bucketName);
     }
-  }, [bucketName, setCurrentBucket]);
+  }, [bucketName, connectionId, setCurrentBucket]);
+
+  React.useEffect(() => {
+    setInitialLoaded(false);
+    setThumbnailUrls({});
+    setVisibleImageKeys([]);
+  }, [connectionId, bucketName, currentPrefix]);
 
   const loadObjects = React.useCallback(
     async (forceRefresh = false) => {
       if (!bucketName || !connectionId) return;
+      if (currentConnectionId !== connectionId || currentBucket !== bucketName) return;
 
-      // Read from live store (not stale closure) to check prefix-cache hit
-      const hasStoreCache = useObjectStore.getState().objects.length > 0;
+      const hasStoreCache = hasPrefixCache(connectionId, bucketName, currentPrefix);
 
-      // Stale-while-revalidate: show cached data instantly, then refresh in background
       if (!forceRefresh) {
         if (hasStoreCache) {
-          // Store cache already populated — skip loading indicator, just refresh in background
           setInitialLoaded(true);
         } else {
-          // Try disk cache first
-          const hasDiskCache = await loadCachedObjects(connectionId);
-          if (hasDiskCache) {
+          const cacheResult = await loadCachedObjects(connectionId);
+          if (cacheResult.hit) {
             setInitialLoaded(true);
           } else {
-            // Fall back to TTL cache / network
-            const cached = await S3Service.listObjects(connectionId, bucketName, currentPrefix);
-            if (cached.length > 0) {
-              setObjects(cached);
+            const ttlCached = S3Service.getCachedObjectList(connectionId, bucketName, currentPrefix);
+            if (ttlCached !== undefined) {
+              setObjects(ttlCached, { persist: false });
               setInitialLoaded(true);
             } else {
+              setInitialLoaded(false);
               setLoading(true);
             }
           }
         }
-        // Always fetch fresh data in background
+
         try {
           const fresh = await S3Service.listObjectsFresh(connectionId, bucketName, currentPrefix);
           setObjects(fresh);
         } catch (error: any) {
-          if (!hasStoreCache) console.error('Failed to load objects:', error);
+          if (!hasStoreCache) {
+            console.error('Failed to load objects:', error);
+          }
         } finally {
           setLoading(false);
           setInitialLoaded(true);
         }
       } else {
-        // Explicit refresh (pull-to-refresh)
         setLoading(true);
         try {
           const fresh = await S3Service.listObjectsFresh(connectionId, bucketName, currentPrefix);
@@ -280,38 +271,61 @@ export default function ObjectBrowserScreen() {
         }
       }
     },
-    [bucketName, connectionId, currentPrefix, setObjects, loadCachedObjects, setLoading]
+    [
+      bucketName,
+      connectionId,
+      currentBucket,
+      currentConnectionId,
+      currentPrefix,
+      hasPrefixCache,
+      setObjects,
+      loadCachedObjects,
+      setLoading,
+    ]
   );
 
   React.useEffect(() => {
     loadObjects();
   }, [loadObjects]);
 
-  // Generate thumbnail URLs for image files — parallel batch with caching
+  const onViewableItemsChanged = React.useCallback(
+    ({ viewableItems }: { viewableItems: Array<ViewToken> }) => {
+      const nextKeys = viewableItems
+        .map((token) => token.item as S3Object | undefined)
+        .filter(
+          (item): item is S3Object => !!item && !item.isFolder && S3Service.isImageFile(item.name)
+        )
+        .slice(0, 12)
+        .map((item) => item.key);
+
+      setVisibleImageKeys((prev) => {
+        if (prev.length === nextKeys.length && prev.every((key, index) => key === nextKeys[index])) {
+          return prev;
+        }
+        return nextKeys;
+      });
+    },
+    []
+  );
+
+  const viewabilityConfig = React.useRef({ itemVisiblePercentThreshold: 60 }).current;
+
   React.useEffect(() => {
     if (!connectionId || !bucketName || !showThumbnails) {
-      setThumbnailUrls({});
       return;
     }
     let cancelled = false;
 
-    const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico'];
-    const imageObjects = objects.filter((o) => {
-      if (o.isFolder) return false;
-      const ext = o.name.split('.').pop()?.toLowerCase() ?? '';
-      return imageExts.includes(ext);
-    });
-
-    if (imageObjects.length === 0) {
-      setThumbnailUrls({});
+    const pendingKeys = visibleImageKeys.filter((key) => !thumbnailUrls[key]);
+    if (pendingKeys.length === 0) {
       return;
     }
 
-    // Use batch parallel generator (with internal caching)
-    const keys = imageObjects.slice(0, 50).map((o) => o.key);
-    S3Service.batchGetFileUrls(connectionId, bucketName, keys, 1800)
+    S3Service.batchGetFileUrls(connectionId, bucketName, pendingKeys.slice(0, 12), 1800)
       .then((urls) => {
-        if (!cancelled) setThumbnailUrls(urls);
+        if (!cancelled) {
+          setThumbnailUrls((prev) => ({ ...prev, ...urls }));
+        }
       })
       .catch(() => {
         // Silently skip thumbnail failures
@@ -320,7 +334,7 @@ export default function ObjectBrowserScreen() {
     return () => {
       cancelled = true;
     };
-  }, [objects, connectionId, bucketName, showThumbnails]);
+  }, [visibleImageKeys, thumbnailUrls, connectionId, bucketName, showThumbnails]);
 
   const handleFolderPress = React.useCallback(
     (folder: S3Object) => {
@@ -345,13 +359,14 @@ export default function ObjectBrowserScreen() {
       setNewFolderName('');
       setShowCreateFolderDialog(false);
       invalidateBucketCache(connectionId, bucketName);
-      loadObjects(true);
+      await clearBucketSnapshots(connectionId, bucketName);
+      await loadObjects(true);
     } catch (error: any) {
       setCreateFolderError(error.message || 'Failed to create folder');
     } finally {
       setIsCreatingFolder(false);
     }
-  }, [newFolderName, bucketName, connectionId, currentPrefix, loadObjects]);
+  }, [newFolderName, bucketName, connectionId, currentPrefix, clearBucketSnapshots, loadObjects]);
 
   // ── Delete folder ──────────────────────────────────────────────────────
   const confirmDeleteFolder = React.useCallback(async () => {
@@ -362,13 +377,14 @@ export default function ObjectBrowserScreen() {
       setShowDeleteFolderDialog(false);
       setDeleteFolderTarget(null);
       invalidateBucketCache(connectionId, bucketName);
-      loadObjects(true);
+      await clearBucketSnapshots(connectionId, bucketName);
+      await loadObjects(true);
     } catch (error: any) {
       console.error('Delete folder failed:', error);
     } finally {
       setIsDeletingFolder(false);
     }
-  }, [deleteFolderTarget, bucketName, connectionId, loadObjects]);
+  }, [deleteFolderTarget, bucketName, connectionId, clearBucketSnapshots, loadObjects]);
 
   const handleGoUp = React.useCallback(() => {
     const parts = currentPrefix.split('/').filter(Boolean);
@@ -546,14 +562,15 @@ export default function ObjectBrowserScreen() {
       );
       clearSelection();
       setSelectionMode(false);
-      loadObjects(true);
+      await clearBucketSnapshots(connectionId, bucketName);
+      await loadObjects(true);
     } catch (error: any) {
       console.error('Delete failed:', error);
     } finally {
       setIsDeletingFiles(false);
       setDeleteDialogOpen(false);
     }
-  }, [bucketName, connectionId, objects, selectedKeys, clearSelection, loadObjects]);
+  }, [bucketName, connectionId, objects, selectedKeys, clearSelection, clearBucketSnapshots, loadObjects]);
 
   // ── Copy link for preview item ───────────────────────────────────────────
   const handlePreviewCopyLink = React.useCallback(async () => {
@@ -682,13 +699,16 @@ export default function ObjectBrowserScreen() {
       // Refresh file listing after uploads complete (invalidate cache first)
       invalidateBucketCache(connectionId!, bucketName);
       setTimeout(() => {
-        loadObjects(true);
-        setUploadBatch(null); // Clear batch overlay
+        void (async () => {
+          await clearBucketSnapshots(connectionId!, bucketName);
+          await loadObjects(true);
+          setUploadBatch(null);
+        })();
       }, 1000);
     } catch (error: any) {
       console.error('Document picker error:', error);
     }
-  }, [currentPrefix, bucketName, connectionId, addTask, updateTask, loadObjects]);
+  }, [currentPrefix, bucketName, connectionId, addTask, updateTask, clearBucketSnapshots, loadObjects]);
 
   // ── File press handler (preview for files, navigate for folders) ──────
   const handleFilePress = React.useCallback(
@@ -868,41 +888,49 @@ export default function ObjectBrowserScreen() {
       <Separator />
 
       {/* Object List */}
-      <FlatList
-        data={listData}
-        keyExtractor={(item) => item.key}
-        renderItem={({ item }) => {
-          if (item.key === '__go_up__') {
-            return (
-              <Pressable
-                onPress={handleGoUp}
-                className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
-                <Icon as={ChevronLeftIcon} className="text-muted-foreground size-5" />
-                <Text className="text-foreground">..</Text>
-              </Pressable>
-            );
-          }
-          return renderItem({ item });
-        }}
-        refreshControl={
-          <RefreshControl
-            refreshing={initialLoaded && isLoading}
-            onRefresh={() => loadObjects(true)}
+      {initialLoaded ? (
+        <NativeOnlyAnimatedView entering={fadeIn(80)} className="flex-1">
+          <FlatList
+            data={listData}
+            keyExtractor={(item) => item.key}
+            initialNumToRender={12}
+            maxToRenderPerBatch={12}
+            windowSize={5}
+            removeClippedSubviews={Platform.OS !== 'web'}
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={viewabilityConfig}
+            renderItem={({ item }) => {
+              if (item.key === '__go_up__') {
+                return (
+                  <Pressable
+                    onPress={handleGoUp}
+                    className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
+                    <Icon as={ChevronLeftIcon} className="text-muted-foreground size-5" />
+                    <Text className="text-foreground">..</Text>
+                  </Pressable>
+                );
+              }
+              return renderItem({ item });
+            }}
+            refreshControl={
+              <RefreshControl
+                refreshing={initialLoaded && isLoading}
+                onRefresh={() => loadObjects(true)}
+              />
+            }
+            contentContainerClassName="pb-24"
+            ListEmptyComponent={
+              <EmptyState
+                icon={FolderIcon}
+                title={t('bucket.empty')}
+                description={t('bucket.emptyDesc')}
+              />
+            }
           />
-        }
-        contentContainerClassName="pb-24"
-        ListEmptyComponent={
-          !initialLoaded ? (
-            <ObjectListSkeleton />
-          ) : (
-            <EmptyState
-              icon={FolderIcon}
-              title={t('bucket.empty')}
-              description={t('bucket.emptyDesc')}
-            />
-          )
-        }
-      />
+        </NativeOnlyAnimatedView>
+      ) : (
+        <View className="flex-1" />
+      )}
 
       {/* Upload Progress Overlay */}
       {uploadProgress && (

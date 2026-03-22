@@ -58,7 +58,6 @@ import {
   ToastAndroid,
   type LayoutChangeEvent,
 } from 'react-native';
-import { Skeleton } from '@/components/ui/skeleton';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -77,23 +76,6 @@ interface ProviderSection {
 const TAB_TIMING_CONFIG = { duration: 180, easing: Easing.out(Easing.quad) };
 const TAB_CONTAINER_PADDING = 3;
 const TAB_GAP = 4;
-
-/** Skeleton placeholder shown while buckets load for the first time */
-function BucketListSkeleton() {
-  return (
-    <View className="px-4 py-2">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <View key={i} className="flex-row items-center gap-3 py-3.5">
-          <Skeleton className="size-10 rounded-lg" />
-          <View className="flex-1 gap-1.5">
-            <Skeleton className="h-4 w-3/5 rounded" />
-            <Skeleton className="h-3 w-1/4 rounded" />
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
 
 // ── Collapsible Provider Section ─────────────────────────────────────────
 
@@ -497,7 +479,6 @@ export default function BucketIndexScreen() {
   }, [deleteBucketTarget, connections, setBucketsForConnection, setVisibleBuckets, showSystemToast, t]);
 
   // ── No connections at all ──────────────────────────────────────────────
-  // Show skeleton while store is still loading from SecureStore
   if (isInitializing) {
     return (
       <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
@@ -506,7 +487,7 @@ export default function BucketIndexScreen() {
           <Text className="text-foreground text-xl font-bold">{t('buckets.title')}</Text>
         </View>
         <Separator />
-        <BucketListSkeleton />
+        <View className="flex-1" />
       </ScreenTransitionView>
     );
   }
@@ -529,7 +510,7 @@ export default function BucketIndexScreen() {
 
   // ── No connected providers ─────────────────────────────────────────────
 
-  // If some connections are still connecting, show skeleton instead of 'Not Connected'
+  // If some connections are still connecting, keep the screen empty until data fades in.
   if (connectedList.length === 0 && activeOrConnectingList.length > 0 && !canShowCached) {
     return (
       <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
@@ -538,7 +519,7 @@ export default function BucketIndexScreen() {
           <Text className="text-foreground text-xl font-bold">{t('buckets.title')}</Text>
         </View>
         <Separator />
-        <BucketListSkeleton />
+        <View className="flex-1" />
       </ScreenTransitionView>
     );
   }
@@ -632,28 +613,30 @@ export default function BucketIndexScreen() {
             <RefreshControl refreshing={initialLoaded && isLoading} onRefresh={loadAllBuckets} />
           }
           contentContainerClassName="pt-3 pb-24">
-          {!initialLoaded && !canShowCached ? (
-            <BucketListSkeleton />
-          ) : filteredSections.length === 0 ? (
-            <EmptyState
-              icon={FolderIcon}
-              title={t('buckets.noBucketsTitle')}
-              description={t('buckets.noBucketsDesc')}
-            />
-          ) : (
-            filteredSections.map((section, index) => (
-              <ProviderSectionCard
-                key={section.connection.id}
-                index={index}
-                section={section}
-                collapsed={!expandedIds.has(section.connection.id)}
-                onToggle={() => toggleCollapse(section.connection.id)}
-                onBucketPress={handleBucketPress}
-                onCreateBucket={openCreateDialog}
-                onDeleteBucket={handleDeleteBucket}
+          {initialLoaded || canShowCached ? (
+            filteredSections.length === 0 ? (
+              <EmptyState
+                icon={FolderIcon}
+                title={t('buckets.noBucketsTitle')}
+                description={t('buckets.noBucketsDesc')}
               />
-            ))
-          )}
+            ) : (
+              <NativeOnlyAnimatedView entering={fadeIn(80)} exiting={fadeOut()}>
+                {filteredSections.map((section, index) => (
+                  <ProviderSectionCard
+                    key={section.connection.id}
+                    index={index}
+                    section={section}
+                    collapsed={!expandedIds.has(section.connection.id)}
+                    onToggle={() => toggleCollapse(section.connection.id)}
+                    onBucketPress={handleBucketPress}
+                    onCreateBucket={openCreateDialog}
+                    onDeleteBucket={handleDeleteBucket}
+                  />
+                ))}
+              </NativeOnlyAnimatedView>
+            )
+          ) : null}
         </ScrollView>
       </View>
 
