@@ -75,9 +75,9 @@ import {
 } from '@/lib/download-directory';
 import { useSettingsStore } from '@/lib/stores/settings-store';
 import { useT } from '@/lib/i18n';
+import { runUploadTask } from '@/lib/upload-executor';
 import {
   IMAGE_COMPRESSION_FAILED_ERROR,
-  prepareUploadFile,
   resolveInitialUploadFileName,
   validateUploadFileNames,
   type UploadFileNameValidationError,
@@ -115,6 +115,27 @@ function mergeUploadedObjects(existing: S3Object[], uploaded: S3Object[]): S3Obj
     ...folderEntries.sort(compareObjectNames),
     ...Array.from(mergedFilesByKey.values()).sort(compareObjectNames),
   ];
+}
+
+function silentlyReconcileObjects(
+  connectionId: string,
+  bucketName: string,
+  prefix: string
+): void {
+  void S3Service.listObjectsFresh(connectionId, bucketName, prefix)
+    .then((freshObjects) => {
+      const state = useObjectStore.getState();
+      if (
+        state.currentConnectionId === connectionId &&
+        state.currentBucket === bucketName &&
+        state.currentPrefix === prefix
+      ) {
+        state.setObjects(freshObjects);
+      }
+    })
+    .catch(() => {
+      // Keep the optimistic list if silent reconciliation fails.
+    });
 }
 
 function createUploadDraft(
@@ -485,14 +506,34 @@ export default function ObjectBrowserScreen() {
       setShowDeleteFolderDialog(false);
       setDeleteFolderTarget(null);
       invalidateBucketCache(connectionId, bucketName);
-      await clearBucketSnapshots(connectionId, bucketName);
-      await loadObjects(true);
+      const canIncrementallyRefresh =
+        currentConnectionId === connectionId &&
+        currentBucket === bucketName;
+
+      if (canIncrementallyRefresh) {
+        setObjects(objects.filter((item) => item.key !== deleteFolderTarget.key));
+        silentlyReconcileObjects(connectionId, bucketName, currentPrefix);
+      } else {
+        await clearBucketSnapshots(connectionId, bucketName);
+        await loadObjects(true);
+      }
     } catch (error: any) {
       console.error('Delete folder failed:', error);
     } finally {
       setIsDeletingFolder(false);
     }
-  }, [deleteFolderTarget, bucketName, connectionId, clearBucketSnapshots, loadObjects]);
+  }, [
+    deleteFolderTarget,
+    bucketName,
+    connectionId,
+    currentBucket,
+    currentConnectionId,
+    currentPrefix,
+    objects,
+    setObjects,
+    clearBucketSnapshots,
+    loadObjects,
+  ]);
 
   const handleGoUp = React.useCallback(() => {
     const parts = currentPrefix.split('/').filter(Boolean);
@@ -661,6 +702,7 @@ export default function ObjectBrowserScreen() {
   const confirmDelete = React.useCallback(async () => {
     if (!bucketName || !connectionId) return;
     const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
+    const selectedKeySet = new Set(selected.map((item) => item.key));
     setIsDeletingFiles(true);
     try {
       await S3Service.deleteObjects(
@@ -670,15 +712,38 @@ export default function ObjectBrowserScreen() {
       );
       clearSelection();
       setSelectionMode(false);
-      await clearBucketSnapshots(connectionId, bucketName);
-      await loadObjects(true);
+      invalidateBucketCache(connectionId, bucketName);
+
+      const canIncrementallyRefresh =
+        currentConnectionId === connectionId &&
+        currentBucket === bucketName;
+
+      if (canIncrementallyRefresh) {
+        setObjects(objects.filter((item) => !selectedKeySet.has(item.key)));
+        silentlyReconcileObjects(connectionId, bucketName, currentPrefix);
+      } else {
+        await clearBucketSnapshots(connectionId, bucketName);
+        await loadObjects(true);
+      }
     } catch (error: any) {
       console.error('Delete failed:', error);
     } finally {
       setIsDeletingFiles(false);
       setDeleteDialogOpen(false);
     }
-  }, [bucketName, connectionId, objects, selectedKeys, clearSelection, clearBucketSnapshots, loadObjects]);
+  }, [
+    bucketName,
+    connectionId,
+    objects,
+    selectedKeys,
+    currentBucket,
+    currentConnectionId,
+    currentPrefix,
+    clearSelection,
+    setObjects,
+    clearBucketSnapshots,
+    loadObjects,
+  ]);
 
   // ── Copy link for preview item ───────────────────────────────────────────
   const handlePreviewCopyLink = React.useCallback(async () => {
@@ -731,94 +796,25 @@ export default function ObjectBrowserScreen() {
       const uploadedObjects: S3Object[] = [];
 
       for (const file of files) {
-        let taskId: string | null = null;
-        let progressTimer: ReturnType<typeof setInterval> | null = null;
+        const result = await runUploadTask({
+          connectionId,
+          bucket: bucketName,
+          key: prefix + file.name,
+          inputFile: file,
+          targetFileName: file.name,
+          imageCompression,
+          addTask,
+          updateTask,
+          mapError: getReadableUploadError,
+        });
 
-        try {
-          const uploadFile = await prepareUploadFile(file, {
-            fileName: file.name,
-            imageCompression,
-          });
-
-          const key = prefix + uploadFile.name;
-          const mimeType = uploadFile.mimeType || S3Service.guessMimeType(uploadFile.name);
-          const fileSize = uploadFile.size ?? 0;
-          const activeTaskId = generateId();
-          taskId = activeTaskId;
-
-          const task: TransferTask = {
-            id: activeTaskId,
-            fileName: uploadFile.name,
-            type: 'upload',
-            status: 'active',
-            progress: 0,
-            totalBytes: fileSize,
-            transferredBytes: 0,
-            bucket: bucketName,
-            key,
-            connectionId,
-            localPath: uploadFile.uri,
-            startedAt: new Date().toISOString(),
-          };
-          addTask(task);
-
-          let currentProgress = 5;
-          const increment = fileSize > 10_000_000 ? 1.5 : fileSize > 1_000_000 ? 4 : 10;
-          const interval = fileSize > 10_000_000 ? 800 : 500;
-          const presignedUrl = await S3Service.getPresignedUploadUrl(
-            connectionId,
-            bucketName,
-            key,
-            mimeType
-          );
-
-          updateTask(activeTaskId, { progress: currentProgress });
-
-          progressTimer = setInterval(() => {
-            if (currentProgress < 90) {
-              currentProgress = Math.min(90, currentProgress + increment);
-            } else if (currentProgress < 99) {
-              currentProgress = Math.min(99, currentProgress + 0.5);
-            }
-            const estimatedBytes = Math.round((currentProgress / 100) * fileSize);
-            updateTask(activeTaskId, {
-              progress: Math.round(currentProgress),
-              transferredBytes: estimatedBytes,
-            });
-          }, interval);
-
-          await FileSystem.uploadAsync(presignedUrl, uploadFile.uri, {
-            httpMethod: 'PUT',
-            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-            headers: { 'Content-Type': mimeType },
-          });
-
-          if (progressTimer) clearInterval(progressTimer);
-          updateTask(activeTaskId, {
-            progress: 100,
-            transferredBytes: fileSize,
-            status: 'completed',
-            completedAt: new Date().toISOString(),
-          });
-          uploadedObjects.push({
-            key,
-            name: uploadFile.name,
-            size: fileSize,
-            lastModified: new Date().toISOString(),
-            isFolder: false,
-          });
-        } catch (error: any) {
-          if (progressTimer) clearInterval(progressTimer);
-          console.error('Upload error:', error);
-          if (taskId) {
-            updateTask(taskId, {
-              status: 'failed',
-              error: getReadableUploadError(error),
-            });
-          }
-        } finally {
-          setUploadBatch((prev) => (prev ? { ...prev, completed: prev.completed + 1 } : prev));
+        if (result.success && result.object) {
+          uploadedObjects.push(result.object);
+        } else if (!result.success) {
+          console.error('Upload error:', result.error);
         }
+
+        setUploadBatch((prev) => (prev ? { ...prev, completed: prev.completed + 1 } : prev));
       }
 
       invalidateBucketCache(connectionId, bucketName);
@@ -830,6 +826,7 @@ export default function ObjectBrowserScreen() {
 
       if (canIncrementallyRefresh) {
         setObjects(mergeUploadedObjects(objects, uploadedObjects));
+        silentlyReconcileObjects(connectionId, bucketName, prefix);
         setUploadBatch(null);
         setPendingUploadFiles([]);
         setPendingUploadPrefix('');

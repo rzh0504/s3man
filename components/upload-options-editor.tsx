@@ -8,6 +8,7 @@ import { formatBytes } from '@/lib/constants';
 import { useT } from '@/lib/i18n';
 import {
   estimateCompressedFileSize,
+  getRealCompressedFileSizePreview,
   getUploadFileNameParts,
   isCompressibleImageFile,
   type UploadFileLike,
@@ -42,6 +43,12 @@ const IMAGE_COMPRESSION_OPTIONS: Array<{
   { value: 'high', labelKey: 'uploadConfig.qualityHigh' },
   { value: 'medium', labelKey: 'uploadConfig.qualityMedium' },
   { value: 'low', labelKey: 'uploadConfig.qualityLow' },
+];
+
+const REAL_PREVIEW_COMPRESSION_LEVELS: Exclude<UploadImageCompression, 'original'>[] = [
+  'high',
+  'medium',
+  'low',
 ];
 
 const TAB_TIMING_CONFIG = { duration: 180, easing: Easing.out(Easing.quad) };
@@ -144,16 +151,59 @@ const UploadFileNameField = React.memo(function UploadFileNameField({
   }, [file.id, initialParts.baseName]);
 
   const extensionSuffix = initialParts.extension ? `.${initialParts.extension}` : '';
+  const isCompressible = isCompressibleImageFile(file);
   const estimatedSize = React.useMemo(
     () => estimateCompressedFileSize(file, imageCompression),
     [file, imageCompression]
   );
+  const [previewSizes, setPreviewSizes] = React.useState<
+    Partial<Record<UploadImageCompression, number | undefined>>
+  >({
+    original: file.size,
+  });
+
+  React.useEffect(() => {
+    setPreviewSizes({ original: file.size });
+  }, [file.id, file.size]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    if (!isCompressible) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    REAL_PREVIEW_COMPRESSION_LEVELS.forEach((compression) => {
+      if (previewSizes[compression] !== undefined) return;
+
+      void getRealCompressedFileSizePreview(file, compression).then((size) => {
+        if (!cancelled) {
+          setPreviewSizes((prev) => {
+            if (prev[compression] !== undefined) return prev;
+            return { ...prev, [compression]: size };
+          });
+        }
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [file, isCompressible, previewSizes]);
+
+  const displaySize =
+    imageCompression === 'original'
+      ? file.size
+      : previewSizes[imageCompression] ?? estimatedSize;
+
   const sizeLabel =
-    estimatedSize == null
+    displaySize == null
       ? null
-      : imageCompression !== 'original' && isCompressibleImageFile(file)
-        ? `~${formatBytes(estimatedSize)}`
-        : formatBytes(estimatedSize);
+      : imageCompression !== 'original' && isCompressible
+        ? `${formatBytes(displaySize)}`
+        : formatBytes(displaySize);
 
   return (
     <View className="gap-2">
@@ -161,7 +211,10 @@ const UploadFileNameField = React.memo(function UploadFileNameField({
         <Text className="text-foreground text-sm font-medium">{t('uploadConfig.fileName')}</Text>
         {sizeLabel ? (
           <View className="min-w-20 items-end">
-            <NativeOnlyAnimatedView key={sizeLabel} entering={fadeIn(20)} exiting={fadeOut()}>
+            <NativeOnlyAnimatedView
+              key={`${imageCompression}:${sizeLabel}`}
+              entering={fadeIn(20)}
+              exiting={fadeOut()}>
               <Text className="text-muted-foreground text-xs">{sizeLabel}</Text>
             </NativeOnlyAnimatedView>
           </View>

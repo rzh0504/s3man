@@ -8,7 +8,7 @@ import { useConnectionStore } from '@/lib/stores/connection-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
 import * as S3Service from '@/lib/s3-service';
 import { formatBytes, getProvider } from '@/lib/constants';
-import type { BucketInfo, TransferTask } from '@/lib/types';
+import type { BucketInfo } from '@/lib/types';
 import {
   UploadCloudIcon,
   XIcon,
@@ -31,9 +31,9 @@ import {
 } from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useT } from '@/lib/i18n';
+import { runUploadTask } from '@/lib/upload-executor';
 import {
   IMAGE_COMPRESSION_FAILED_ERROR,
-  prepareUploadFile,
   resolveInitialUploadFileName,
   validateUploadFileNames,
   type UploadFileNameValidationError,
@@ -406,100 +406,45 @@ export default function HandleShareScreen() {
     let failedCount = 0;
 
     for (let i = 0; i < sharedFiles.length; i++) {
-      // Update state to uploading
       results[i] = { ...results[i], status: 'uploading', progress: 3, error: undefined };
       setFileStates([...results]);
-
-      let progressTimer: ReturnType<typeof setInterval> | null = null;
-      let taskId: string | null = null;
 
       try {
         const preparedFile = await resolveSharedFileForUpload(sharedFiles[i], i);
         syncPreparedFile(i, preparedFile);
-        const uploadFile = await prepareUploadFile(preparedFile, {
-          fileName: sharedFiles[i].name,
-          imageCompression,
-        });
-        syncPreparedFile(i, uploadFile);
-
-        const key = uploadFile.name;
-        const mimeType = uploadFile.mimeType || S3Service.guessMimeType(uploadFile.name);
-        const fileSize = uploadFile.size ?? 0;
-
-        taskId = generateId();
-        const task: TransferTask = {
-          id: taskId,
-          fileName: uploadFile.name,
-          type: 'upload',
-          status: 'active',
-          progress: 0,
-          totalBytes: fileSize,
-          transferredBytes: 0,
-          bucket: selectedBucket,
-          key,
+        const result = await runUploadTask({
           connectionId: selectedConnectionId,
-          localPath: uploadFile.uri,
-          startedAt: new Date().toISOString(),
-        };
-        addTask(task);
-
-        const presignedUrl = await S3Service.getPresignedUploadUrl(
-          selectedConnectionId,
-          selectedBucket,
-          key,
-          mimeType
-        );
-
-        results[i] = { ...results[i], progress: 15 };
-        setFileStates([...results]);
-
-        // Simulated progress
-        let currentProgress = 15;
-        const increment = fileSize > 10_000_000 ? 1.5 : fileSize > 1_000_000 ? 4 : 10;
-        const interval = fileSize > 10_000_000 ? 800 : 500;
-        progressTimer = setInterval(() => {
-          if (currentProgress < 90) {
-            currentProgress = Math.min(90, currentProgress + increment);
-            results[i] = { ...results[i], progress: Math.round(currentProgress) };
+          bucket: selectedBucket,
+          key: sharedFiles[i].name,
+          inputFile: preparedFile,
+          targetFileName: sharedFiles[i].name,
+          imageCompression,
+          addTask,
+          updateTask,
+          mapError: getReadableUploadError,
+          initialProgress: 15,
+          onPreparedFile: (uploadFile) => {
+            syncPreparedFile(i, uploadFile);
+          },
+          onProgress: (progress) => {
+            results[i] = { ...results[i], progress };
             setFileStates([...results]);
-            updateTask(task.id, {
-              progress: Math.round(currentProgress),
-              transferredBytes: Math.round((currentProgress / 100) * fileSize),
-            });
-          }
-        }, interval);
-
-        await FileSystem.uploadAsync(presignedUrl, uploadFile.uri, {
-          httpMethod: 'PUT',
-          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-          headers: { 'Content-Type': mimeType },
+          },
         });
+
+        if (!result.success) {
+          throw new Error(result.error);
+        }
 
         results[i] = { ...results[i], status: 'done', progress: 100 };
         setFileStates([...results]);
-        updateTask(task.id, {
-          progress: 100,
-          transferredBytes: fileSize,
-          status: 'completed',
-          completedAt: new Date().toISOString(),
-        });
         successCount += 1;
       } catch (error: any) {
         console.error('Share upload error:', error);
         const errorMessage = getReadableUploadError(error);
         results[i] = { ...results[i], status: 'error', error: errorMessage };
         setFileStates([...results]);
-        if (taskId) {
-          updateTask(taskId, {
-            status: 'failed',
-            error: errorMessage,
-          });
-        }
         failedCount += 1;
-      } finally {
-        if (progressTimer) {
-          clearInterval(progressTimer);
-        }
       }
     }
 

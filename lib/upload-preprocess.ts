@@ -41,6 +41,8 @@ const IMAGE_SIZE_ESTIMATE_RATIO: Record<
   low: { jpeg: 0.56, png: 0.82, webp: 0.52 },
 };
 
+const compressionPreviewSizeCache = new Map<string, Promise<number | undefined>>();
+
 const MIME_TYPE_EXTENSION_MAP: Record<string, string> = {
   'image/bmp': 'bmp',
   'image/gif': 'gif',
@@ -273,6 +275,66 @@ function resolveCompressedFileName(fileName: string, format: SaveFormat): string
   return extension === 'webp' ? fileName : replaceFileExtension(fileName, 'webp');
 }
 
+async function compressImageFile(
+  file: UploadFileLike,
+  resolvedName: string,
+  imageCompression: Exclude<UploadImageCompression, 'original'>
+): Promise<UploadFileLike> {
+  const format = resolveImageSaveFormat(resolvedName);
+  const compressed = await manipulateAsync(file.uri, [], {
+    compress: IMAGE_COMPRESSION_QUALITY[imageCompression],
+    format,
+  });
+  const compressedName = resolveCompressedFileName(resolvedName, format);
+  const fileInfo = await FileSystem.getInfoAsync(compressed.uri);
+
+  return {
+    uri: compressed.uri,
+    name: compressedName,
+    size: fileInfo.exists && 'size' in fileInfo ? fileInfo.size : file.size,
+    mimeType: S3Service.guessMimeType(compressedName),
+  };
+}
+
+export async function getRealCompressedFileSizePreview(
+  file: UploadFileLike,
+  imageCompression: UploadImageCompression
+): Promise<number | undefined> {
+  if (imageCompression === 'original' || !isCompressibleImageFile(file)) {
+    return file.size;
+  }
+
+  const cacheKey = `${file.uri}|${file.name}|${imageCompression}`;
+  const cached = compressionPreviewSizeCache.get(cacheKey);
+  if (cached) return cached;
+
+  const previewPromise = (async () => {
+    const resolvedName = resolveUploadFileName(file.name, {
+      mimeType: file.mimeType,
+      originalName: file.name,
+    });
+    const originalInfo =
+      file.size != null ? { exists: true, size: file.size } : await FileSystem.getInfoAsync(file.uri);
+    const originalSize =
+      originalInfo.exists && 'size' in originalInfo ? originalInfo.size : file.size;
+
+    let previewFile: UploadFileLike | null = null;
+    try {
+      previewFile = await compressImageFile(file, resolvedName, imageCompression);
+      return previewFile.size ?? originalSize;
+    } catch {
+      return estimateCompressedFileSize(file, imageCompression);
+    } finally {
+      if (previewFile && previewFile.uri !== file.uri) {
+        await FileSystem.deleteAsync(previewFile.uri, { idempotent: true }).catch(() => {});
+      }
+    }
+  })();
+
+  compressionPreviewSizeCache.set(cacheKey, previewPromise);
+  return previewPromise;
+}
+
 export async function prepareUploadFile(
   file: UploadFileLike,
   options: PrepareUploadFileOptions
@@ -292,16 +354,10 @@ export async function prepareUploadFile(
   }
 
   try {
-    const format = resolveImageSaveFormat(resolvedName);
-    const compressed = await manipulateAsync(file.uri, [], {
-      compress: IMAGE_COMPRESSION_QUALITY[options.imageCompression],
-      format,
-    });
-    const compressedName = resolveCompressedFileName(resolvedName, format);
-    const fileInfo = await FileSystem.getInfoAsync(compressed.uri);
+    const compressedFile = await compressImageFile(file, resolvedName, options.imageCompression);
     const originalInfo =
       file.size != null ? { exists: true, size: file.size } : await FileSystem.getInfoAsync(file.uri);
-    const compressedSize = fileInfo.exists && 'size' in fileInfo ? fileInfo.size : file.size;
+    const compressedSize = compressedFile.size;
     const originalSize = originalInfo.exists && 'size' in originalInfo ? originalInfo.size : file.size;
 
     if (
@@ -318,10 +374,10 @@ export async function prepareUploadFile(
     }
 
     return {
-      uri: compressed.uri,
-      name: compressedName,
+      uri: compressedFile.uri,
+      name: compressedFile.name,
       size: compressedSize,
-      mimeType: S3Service.guessMimeType(compressedName),
+      mimeType: compressedFile.mimeType,
     };
   } catch {
     throw new Error(IMAGE_COMPRESSION_FAILED_ERROR);
