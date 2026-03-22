@@ -39,6 +39,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Android project
+        run: pnpm exec expo prebuild --platform android --non-interactive
+
       - name: Build release APK
         working-directory: android
         shell: bash
