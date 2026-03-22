@@ -3,6 +3,7 @@ import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Separator } from '@/components/ui/separator';
 import { ProviderIcon } from '@/components/provider-icons';
+import { UploadOptionsEditor, type UploadDraftFile } from '@/components/upload-options-editor';
 import { useConnectionStore } from '@/lib/stores/connection-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
 import * as S3Service from '@/lib/s3-service';
@@ -30,6 +31,14 @@ import {
 } from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useT } from '@/lib/i18n';
+import {
+  IMAGE_COMPRESSION_FAILED_ERROR,
+  prepareUploadFile,
+  resolveInitialUploadFileName,
+  validateUploadFileNames,
+  type UploadFileNameValidationError,
+  type UploadImageCompression,
+} from '@/lib/upload-preprocess';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -93,10 +102,18 @@ function toSharedFile(payload: SharePayload, resolved?: ResolvedSharePayload): S
   const uri = resolved?.contentUri || payload.value;
   const mimeType = resolved?.contentMimeType || payload.mimeType;
   const rawName = resolved?.originalName || getFileName(uri);
+  const normalizedName = resolveInitialUploadFileName({
+    providedName: rawName,
+    mimeType,
+    uri,
+    fallbackName: 'shared-file',
+  });
 
   return {
+    id: generateId(),
     uri,
-    name: ensureFileNameExtension(sanitizeFileName(rawName), mimeType),
+    name: normalizedName,
+    originalName: normalizedName,
     size: resolved?.contentSize ?? undefined,
     mimeType,
     shareType: payload.shareType,
@@ -116,9 +133,8 @@ function getContentIcon(type?: string) {
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-interface SharedFile {
+interface SharedFile extends UploadDraftFile {
   uri: string;
-  name: string;
   size?: number;
   mimeType?: string;
   shareType?: string;
@@ -151,6 +167,8 @@ export default function HandleShareScreen() {
 
   const [sharedFiles, setSharedFiles] = React.useState<SharedFile[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [imageCompression, setImageCompression] =
+    React.useState<UploadImageCompression>('original');
 
   // Destination selection
   const [selectedConnectionId, setSelectedConnectionId] = React.useState<string | null>(null);
@@ -163,6 +181,28 @@ export default function HandleShareScreen() {
   const [isUploading, setIsUploading] = React.useState(false);
   const [uploadDone, setUploadDone] = React.useState(false);
   const [uploadSummary, setUploadSummary] = React.useState<UploadSummary | null>(null);
+
+  const getUploadConfigErrorText = React.useCallback(
+    (error: UploadFileNameValidationError | null) => {
+      switch (error) {
+        case 'duplicate':
+          return t('uploadConfig.duplicateNames');
+        case 'empty':
+          return t('uploadConfig.invalidNameEmpty');
+        case 'invalid_chars':
+          return t('uploadConfig.invalidNameChars');
+        case 'basename_missing':
+          return t('uploadConfig.invalidNameBase');
+        case 'trailing_dot':
+          return t('uploadConfig.invalidNameTrailingDot');
+        case 'extension_missing':
+          return t('uploadConfig.invalidNameExtension');
+        default:
+          return null;
+      }
+    },
+    [t]
+  );
 
   const getReadableUploadError = React.useCallback(
     (error: unknown) => {
@@ -177,26 +217,41 @@ export default function HandleShareScreen() {
         return t('share.prepareFailed');
       }
 
+      if (message === IMAGE_COMPRESSION_FAILED_ERROR) {
+        return t('uploadConfig.imageCompressionFailed');
+      }
+
       return message || t('share.uploadFailed');
     },
     [t]
   );
 
-  const syncPreparedFile = React.useCallback((index: number, file: SharedFile) => {
+  const syncPreparedFile = React.useCallback((index: number, file: Partial<SharedFile>) => {
     setSharedFiles((prev) => {
       if (!prev[index]) return prev;
       const next = [...prev];
-      next[index] = file;
+      next[index] = { ...next[index], ...file };
       return next;
     });
 
     setFileStates((prev) => {
       if (!prev[index]) return prev;
       const next = [...prev];
-      next[index] = { ...next[index], file };
+      next[index] = { ...next[index], file: { ...next[index].file, ...file } };
       return next;
     });
   }, []);
+
+  const uploadConfigError = React.useMemo(() => {
+    const validationError = validateUploadFileNames(
+      sharedFiles.map((file) => ({
+        name: file.name,
+        mimeType: file.mimeType,
+        originalName: file.originalName,
+      }))
+    );
+    return getUploadConfigErrorText(validationError);
+  }, [getUploadConfigErrorText, sharedFiles]);
 
   const resolveSharedFileForUpload = React.useCallback(
     async (file: SharedFile, index: number): Promise<SharedFile> => {
@@ -339,7 +394,9 @@ export default function HandleShareScreen() {
 
   // ── Upload handler ───────────────────────────────────────────────────
   const handleUpload = React.useCallback(async () => {
-    if (!selectedConnectionId || !selectedBucket || sharedFiles.length === 0) return;
+    if (!selectedConnectionId || !selectedBucket || sharedFiles.length === 0 || uploadConfigError) {
+      return;
+    }
     setIsUploading(true);
     setUploadDone(false);
     setUploadSummary(null);
@@ -359,15 +416,20 @@ export default function HandleShareScreen() {
       try {
         const preparedFile = await resolveSharedFileForUpload(sharedFiles[i], i);
         syncPreparedFile(i, preparedFile);
+        const uploadFile = await prepareUploadFile(preparedFile, {
+          fileName: sharedFiles[i].name,
+          imageCompression,
+        });
+        syncPreparedFile(i, uploadFile);
 
-        const key = preparedFile.name;
-        const mimeType = preparedFile.mimeType || S3Service.guessMimeType(preparedFile.name);
-        const fileSize = preparedFile.size ?? 0;
+        const key = uploadFile.name;
+        const mimeType = uploadFile.mimeType || S3Service.guessMimeType(uploadFile.name);
+        const fileSize = uploadFile.size ?? 0;
 
         taskId = generateId();
         const task: TransferTask = {
           id: taskId,
-          fileName: preparedFile.name,
+          fileName: uploadFile.name,
           type: 'upload',
           status: 'active',
           progress: 0,
@@ -376,7 +438,7 @@ export default function HandleShareScreen() {
           bucket: selectedBucket,
           key,
           connectionId: selectedConnectionId,
-          localPath: preparedFile.uri,
+          localPath: uploadFile.uri,
           startedAt: new Date().toISOString(),
         };
         addTask(task);
@@ -407,7 +469,7 @@ export default function HandleShareScreen() {
           }
         }, interval);
 
-        await FileSystem.uploadAsync(presignedUrl, preparedFile.uri, {
+        await FileSystem.uploadAsync(presignedUrl, uploadFile.uri, {
           httpMethod: 'PUT',
           uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
           headers: { 'Content-Type': mimeType },
@@ -457,6 +519,8 @@ export default function HandleShareScreen() {
     getReadableUploadError,
     resolveSharedFileForUpload,
     syncPreparedFile,
+    imageCompression,
+    uploadConfigError,
   ]);
 
   const handleClose = () => {
@@ -520,39 +584,58 @@ export default function HandleShareScreen() {
             <Text className="text-muted-foreground mb-2 text-xs font-medium tracking-wider uppercase">
               {t('share.fileCount', { count: sharedFiles.length })}
             </Text>
-            {sharedFiles.map((file, i) => {
-              const state = fileStates[i];
-              const ContentIcon = getContentIcon(file.shareType);
-              return (
-                <View key={i} className="mb-2 flex-row items-center gap-3 rounded-lg py-2">
-                  <Icon as={ContentIcon} className="text-muted-foreground size-5" />
-                  <View className="flex-1">
-                    <Text className="text-foreground text-sm" numberOfLines={1}>
-                      {file.name}
-                    </Text>
-                    {file.size != null && (
-                      <Text className="text-muted-foreground text-xs">
-                        {formatBytes(file.size)}
+            {isUploading || uploadDone ? (
+              sharedFiles.map((file, i) => {
+                const state = fileStates[i];
+                const ContentIcon = getContentIcon(file.shareType);
+                return (
+                  <View key={file.id} className="mb-2 flex-row items-center gap-3 rounded-lg py-2">
+                    <Icon as={ContentIcon} className="text-muted-foreground size-5" />
+                    <View className="flex-1">
+                      <Text className="text-foreground text-sm" numberOfLines={1}>
+                        {file.name}
                       </Text>
+                      {file.size != null && (
+                        <Text className="text-muted-foreground text-xs">
+                          {formatBytes(file.size)}
+                        </Text>
+                      )}
+                      {state?.status === 'error' && !!state.error && (
+                        <Text className="mt-1 text-xs text-red-500" numberOfLines={3}>
+                          {state.error}
+                        </Text>
+                      )}
+                    </View>
+                    {state?.status === 'uploading' && (
+                      <Text className="text-primary text-xs font-medium">{state.progress}%</Text>
                     )}
-                    {state?.status === 'error' && !!state.error && (
-                      <Text className="mt-1 text-xs text-red-500" numberOfLines={3}>
-                        {state.error}
-                      </Text>
+                    {state?.status === 'done' && (
+                      <Icon as={CheckCircle2Icon} className="text-primary size-5" />
+                    )}
+                    {state?.status === 'error' && (
+                      <Icon as={AlertCircleIcon} className="size-5 text-red-500" />
                     )}
                   </View>
-                  {state?.status === 'uploading' && (
-                    <Text className="text-primary text-xs font-medium">{state.progress}%</Text>
-                  )}
-                  {state?.status === 'done' && (
-                    <Icon as={CheckCircle2Icon} className="text-primary size-5" />
-                  )}
-                  {state?.status === 'error' && (
-                    <Icon as={AlertCircleIcon} className="size-5 text-red-500" />
-                  )}
-                </View>
-              );
-            })}
+                );
+              })
+            ) : (
+              <UploadOptionsEditor
+                files={sharedFiles}
+                imageCompression={imageCompression}
+                onFileNameChange={(id, name) => {
+                  setSharedFiles((prev) =>
+                    prev.map((file) => (file.id === id ? { ...file, name } : file))
+                  );
+                  setFileStates((prev) =>
+                    prev.map((state) =>
+                      state.file.id === id ? { ...state, file: { ...state.file, name } } : state
+                    )
+                  );
+                }}
+                onImageCompressionChange={setImageCompression}
+                validationError={uploadConfigError}
+              />
+            )}
           </View>
 
           <Separator className="mx-4" />
@@ -679,7 +762,12 @@ export default function HandleShareScreen() {
           ) : (
             <Button
               onPress={handleUpload}
-              disabled={!selectedBucket || isUploading || connectedConns.length === 0}
+              disabled={
+                !selectedBucket ||
+                isUploading ||
+                connectedConns.length === 0 ||
+                !!uploadConfigError
+              }
               className="flex-row items-center justify-center gap-2">
               {isUploading ? (
                 <ActivityIndicator size="small" color="white" />

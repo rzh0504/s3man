@@ -38,6 +38,14 @@
     "plugins": [
       "expo-router",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "允许 S3Man 访问你的照片和视频，用于上传到对象存储。",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-sharing",
         {
           "ios": {
