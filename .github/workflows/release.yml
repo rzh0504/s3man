@@ -67,6 +67,8 @@ jobs:
           ./gradlew assembleRelease --stacktrace --no-daemon
 
       - name: Upload APK to GitHub release
-        run: pnpm upload:github -- --path android/app/build/outputs/apk/release/app-release.apk --tag "${{ github.ref_name }}" --name "s3man-${{ github.ref_name }}.apk"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: android/app/build/outputs/apk/release/app-release.apk
+          fail_on_unmatched_files: true
