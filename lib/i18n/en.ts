@@ -187,6 +187,8 @@ export default {
   'bucket.download': 'Download',
   'bucket.longPressHint': 'long press to select',
   'bucket.upload': 'Upload',
+  'bucket.uploadPhotos': 'Photos',
+  'bucket.uploadFiles': 'Files',
   'bucket.newFolder': 'New Folder',
   'bucket.deleteFiles': 'Delete Files',
   'bucket.deleteFilesDesc': 'Are you sure you want to delete {count} file(s)? This action cannot be undone.',
@@ -203,6 +205,9 @@ export default {
   'bucket.deleteFolderDesc': 'Delete "{name}" and all contents? This cannot be undone.',
   'bucket.createFolderFailed': 'Failed to create folder',
   'bucket.downloadFailed': 'Download failed',
+  'bucket.mediaPermissionDenied':
+    'Photo library access is required. Please allow it in system settings.',
+  'bucket.pickMediaFailed': 'Failed to open photo library',
   'bucket.truncated': '... (truncated)',
 
   // ── File Preview ───────────────────────────────────────────────────────
@@ -232,6 +237,27 @@ export default {
   'share.uploading': 'Uploading...',
   'share.uploadTo': 'Upload to {bucket}',
   'share.selectBucket': 'Select a bucket',
+
+  // ── Upload Config ──────────────────────────────────────────────────────
+  'uploadConfig.title': 'Before Upload',
+  'uploadConfig.description': 'Rename files before upload and apply one image compression preset.',
+  'uploadConfig.fileName': 'File name',
+  'uploadConfig.originalName': 'Original name: {name}',
+  'uploadConfig.imageCompression': 'Image compression',
+  'uploadConfig.imageCompressionDesc':
+    'Applies to {count} JPG, PNG, and WebP images. HEIC, HEIF, GIF, and SVG keep their original format.',
+  'uploadConfig.keepOriginal': 'Original',
+  'uploadConfig.qualityHigh': 'High quality',
+  'uploadConfig.qualityMedium': 'Balanced',
+  'uploadConfig.qualityLow': 'High compression',
+  'uploadConfig.duplicateNames': 'Duplicate file names found in this upload list.',
+  'uploadConfig.invalidNameEmpty': 'File name cannot be empty.',
+  'uploadConfig.invalidNameChars': 'File name contains unsupported characters.',
+  'uploadConfig.invalidNameBase': 'File name must include a base name, not just an extension.',
+  'uploadConfig.invalidNameTrailingDot': 'File name cannot end with a dot.',
+  'uploadConfig.invalidNameExtension': 'File name is missing a valid extension.',
+  'uploadConfig.imageCompressionFailed': 'Image compression failed. Try again with Original.',
+  'uploadConfig.confirm': 'Start upload',
 
   // ── Not Found ──────────────────────────────────────────────────────────
   'notFound.title': 'Oops!',

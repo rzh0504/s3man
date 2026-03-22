@@ -22,6 +22,7 @@ import { Breadcrumb } from '@/components/breadcrumb';
 import { EmptyState } from '@/components/empty-state';
 import { FilePreview } from '@/components/file-preview';
 import { InfoTooltip } from '@/components/info-tooltip';
+import { UploadOptionsEditor, type UploadDraftFile } from '@/components/upload-options-editor';
 import { useObjectStore } from '@/lib/stores/object-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
 import * as S3Service from '@/lib/s3-service';
@@ -38,6 +39,8 @@ import {
   XIcon,
   Trash2Icon,
   PlusIcon,
+  ImageIcon,
+  FileIcon,
 } from 'lucide-react-native';
 import * as React from 'react';
 import {
@@ -51,14 +54,17 @@ import {
   BackHandler,
   Alert,
   ToastAndroid,
+  useWindowDimensions,
   type ViewToken,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { S3Object, TransferTask } from '@/lib/types';
 import { Progress } from '@/components/ui/progress';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { invalidateBucketCache } from '@/lib/cache';
 import {
   copyFileToSafDirectoryAsync,
@@ -69,6 +75,14 @@ import {
 } from '@/lib/download-directory';
 import { useSettingsStore } from '@/lib/stores/settings-store';
 import { useT } from '@/lib/i18n';
+import { runUploadTask } from '@/lib/upload-executor';
+import {
+  IMAGE_COMPRESSION_FAILED_ERROR,
+  resolveInitialUploadFileName,
+  validateUploadFileNames,
+  type UploadFileNameValidationError,
+  type UploadImageCompression,
+} from '@/lib/upload-preprocess';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -84,6 +98,84 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
+function compareObjectNames(a: S3Object, b: S3Object): number {
+  return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+}
+
+function mergeUploadedObjects(existing: S3Object[], uploaded: S3Object[]): S3Object[] {
+  const folderEntries = existing.filter((item) => item.isFolder);
+  const fileEntries = existing.filter((item) => !item.isFolder);
+  const mergedFilesByKey = new Map(fileEntries.map((item) => [item.key, item]));
+
+  for (const item of uploaded) {
+    mergedFilesByKey.set(item.key, item);
+  }
+
+  return [
+    ...folderEntries.sort(compareObjectNames),
+    ...Array.from(mergedFilesByKey.values()).sort(compareObjectNames),
+  ];
+}
+
+function silentlyReconcileObjects(
+  connectionId: string,
+  bucketName: string,
+  prefix: string
+): void {
+  void S3Service.listObjectsFresh(connectionId, bucketName, prefix)
+    .then((freshObjects) => {
+      const state = useObjectStore.getState();
+      if (
+        state.currentConnectionId === connectionId &&
+        state.currentBucket === bucketName &&
+        state.currentPrefix === prefix
+      ) {
+        state.setObjects(freshObjects);
+      }
+    })
+    .catch(() => {
+      // Keep the optimistic list if silent reconciliation fails.
+    });
+}
+
+function createUploadDraft(
+  asset: DocumentPicker.DocumentPickerAsset
+): UploadDraftFile {
+  const normalizedName = resolveInitialUploadFileName({
+    providedName: asset.name,
+    mimeType: asset.mimeType ?? undefined,
+    uri: asset.uri,
+    fallbackName: 'file',
+  });
+
+  return {
+    id: generateId(),
+    uri: asset.uri,
+    name: normalizedName,
+    originalName: normalizedName,
+    size: asset.size ?? undefined,
+    mimeType: asset.mimeType ?? undefined,
+  };
+}
+
+function createUploadDraftFromImageAsset(asset: ImagePicker.ImagePickerAsset): UploadDraftFile {
+  const normalizedName = resolveInitialUploadFileName({
+    providedName: asset.fileName,
+    mimeType: asset.mimeType ?? undefined,
+    uri: asset.uri,
+    fallbackName: asset.type === 'video' ? 'video' : 'image',
+  });
+
+  return {
+    id: generateId(),
+    uri: asset.uri,
+    name: normalizedName,
+    originalName: normalizedName,
+    size: asset.fileSize ?? undefined,
+    mimeType: asset.mimeType ?? undefined,
+  };
+}
+
 export default function ObjectBrowserScreen() {
   const { name: bucketName, connectionId } = useLocalSearchParams<{
     name: string;
@@ -92,6 +184,7 @@ export default function ObjectBrowserScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
   const t = useT();
   const {
     currentConnectionId,
@@ -181,6 +274,11 @@ export default function ObjectBrowserScreen() {
   const [newFolderName, setNewFolderName] = React.useState('');
   const [isCreatingFolder, setIsCreatingFolder] = React.useState(false);
   const [createFolderError, setCreateFolderError] = React.useState('');
+  const [showUploadDialog, setShowUploadDialog] = React.useState(false);
+  const [pendingUploadFiles, setPendingUploadFiles] = React.useState<UploadDraftFile[]>([]);
+  const [pendingUploadPrefix, setPendingUploadPrefix] = React.useState('');
+  const [imageCompression, setImageCompression] =
+    React.useState<UploadImageCompression>('original');
 
   // Delete folder
   const [deleteFolderTarget, setDeleteFolderTarget] = React.useState<S3Object | null>(null);
@@ -208,6 +306,37 @@ export default function ObjectBrowserScreen() {
   const crumbs = React.useMemo(() => breadcrumbs(), [currentPrefix]);
   const selectedCount = selectedKeys.size;
   const fileCount = objects.filter((o) => !o.isFolder).length;
+  const getUploadConfigErrorText = React.useCallback(
+    (error: UploadFileNameValidationError | null) => {
+      switch (error) {
+        case 'duplicate':
+          return t('uploadConfig.duplicateNames');
+        case 'empty':
+          return t('uploadConfig.invalidNameEmpty');
+        case 'invalid_chars':
+          return t('uploadConfig.invalidNameChars');
+        case 'basename_missing':
+          return t('uploadConfig.invalidNameBase');
+        case 'trailing_dot':
+          return t('uploadConfig.invalidNameTrailingDot');
+        case 'extension_missing':
+          return t('uploadConfig.invalidNameExtension');
+        default:
+          return null;
+      }
+    },
+    [t]
+  );
+  const uploadConfigError = React.useMemo(() => {
+    const validationError = validateUploadFileNames(
+      pendingUploadFiles.map((file) => ({
+        name: file.name,
+        mimeType: file.mimeType,
+        originalName: file.originalName,
+      }))
+    );
+    return getUploadConfigErrorText(validationError);
+  }, [getUploadConfigErrorText, pendingUploadFiles]);
 
   React.useEffect(() => {
     if (bucketName && connectionId) {
@@ -377,14 +506,34 @@ export default function ObjectBrowserScreen() {
       setShowDeleteFolderDialog(false);
       setDeleteFolderTarget(null);
       invalidateBucketCache(connectionId, bucketName);
-      await clearBucketSnapshots(connectionId, bucketName);
-      await loadObjects(true);
+      const canIncrementallyRefresh =
+        currentConnectionId === connectionId &&
+        currentBucket === bucketName;
+
+      if (canIncrementallyRefresh) {
+        setObjects(objects.filter((item) => item.key !== deleteFolderTarget.key));
+        silentlyReconcileObjects(connectionId, bucketName, currentPrefix);
+      } else {
+        await clearBucketSnapshots(connectionId, bucketName);
+        await loadObjects(true);
+      }
     } catch (error: any) {
       console.error('Delete folder failed:', error);
     } finally {
       setIsDeletingFolder(false);
     }
-  }, [deleteFolderTarget, bucketName, connectionId, clearBucketSnapshots, loadObjects]);
+  }, [
+    deleteFolderTarget,
+    bucketName,
+    connectionId,
+    currentBucket,
+    currentConnectionId,
+    currentPrefix,
+    objects,
+    setObjects,
+    clearBucketSnapshots,
+    loadObjects,
+  ]);
 
   const handleGoUp = React.useCallback(() => {
     const parts = currentPrefix.split('/').filter(Boolean);
@@ -553,6 +702,7 @@ export default function ObjectBrowserScreen() {
   const confirmDelete = React.useCallback(async () => {
     if (!bucketName || !connectionId) return;
     const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
+    const selectedKeySet = new Set(selected.map((item) => item.key));
     setIsDeletingFiles(true);
     try {
       await S3Service.deleteObjects(
@@ -562,15 +712,38 @@ export default function ObjectBrowserScreen() {
       );
       clearSelection();
       setSelectionMode(false);
-      await clearBucketSnapshots(connectionId, bucketName);
-      await loadObjects(true);
+      invalidateBucketCache(connectionId, bucketName);
+
+      const canIncrementallyRefresh =
+        currentConnectionId === connectionId &&
+        currentBucket === bucketName;
+
+      if (canIncrementallyRefresh) {
+        setObjects(objects.filter((item) => !selectedKeySet.has(item.key)));
+        silentlyReconcileObjects(connectionId, bucketName, currentPrefix);
+      } else {
+        await clearBucketSnapshots(connectionId, bucketName);
+        await loadObjects(true);
+      }
     } catch (error: any) {
       console.error('Delete failed:', error);
     } finally {
       setIsDeletingFiles(false);
       setDeleteDialogOpen(false);
     }
-  }, [bucketName, connectionId, objects, selectedKeys, clearSelection, clearBucketSnapshots, loadObjects]);
+  }, [
+    bucketName,
+    connectionId,
+    objects,
+    selectedKeys,
+    currentBucket,
+    currentConnectionId,
+    currentPrefix,
+    clearSelection,
+    setObjects,
+    clearBucketSnapshots,
+    loadObjects,
+  ]);
 
   // ── Copy link for preview item ───────────────────────────────────────────
   const handlePreviewCopyLink = React.useCallback(async () => {
@@ -601,8 +774,115 @@ export default function ObjectBrowserScreen() {
     }
   }, [bucketName, connectionId, objects, selectedKeys]);
 
-  // ── Real Upload (streaming via presigned URL — no full file in memory) ──
-  const handleUpload = React.useCallback(async () => {
+  const getReadableUploadError = React.useCallback(
+    (error: unknown) => {
+      const message = error instanceof Error ? error.message : 'Upload failed';
+      if (message === IMAGE_COMPRESSION_FAILED_ERROR) {
+        return t('uploadConfig.imageCompressionFailed');
+      }
+      return message;
+    },
+    [t]
+  );
+
+  const startUpload = React.useCallback(
+    async (files: UploadDraftFile[], prefix: string) => {
+      if (!bucketName || !connectionId || files.length === 0 || uploadConfigError) {
+        return;
+      }
+
+      setShowUploadDialog(false);
+      setUploadBatch({ total: files.length, completed: 0 });
+      const uploadedObjects: S3Object[] = [];
+
+      for (const file of files) {
+        const result = await runUploadTask({
+          connectionId,
+          bucket: bucketName,
+          key: prefix + file.name,
+          inputFile: file,
+          targetFileName: file.name,
+          imageCompression,
+          addTask,
+          updateTask,
+          mapError: getReadableUploadError,
+        });
+
+        if (result.success && result.object) {
+          uploadedObjects.push(result.object);
+        } else if (!result.success) {
+          console.error('Upload error:', result.error);
+        }
+
+        setUploadBatch((prev) => (prev ? { ...prev, completed: prev.completed + 1 } : prev));
+      }
+
+      invalidateBucketCache(connectionId, bucketName);
+      const canIncrementallyRefresh =
+        uploadedObjects.length > 0 &&
+        currentConnectionId === connectionId &&
+        currentBucket === bucketName &&
+        currentPrefix === prefix;
+
+      if (canIncrementallyRefresh) {
+        setObjects(mergeUploadedObjects(objects, uploadedObjects));
+        silentlyReconcileObjects(connectionId, bucketName, prefix);
+        setUploadBatch(null);
+        setPendingUploadFiles([]);
+        setPendingUploadPrefix('');
+        setImageCompression('original');
+        return;
+      }
+
+      if (uploadedObjects.length > 0) {
+        setTimeout(() => {
+          void (async () => {
+            await clearBucketSnapshots(connectionId, bucketName);
+            await loadObjects(true);
+            setUploadBatch(null);
+            setPendingUploadFiles([]);
+            setPendingUploadPrefix('');
+            setImageCompression('original');
+          })();
+        }, 1000);
+        return;
+      }
+
+      setUploadBatch(null);
+      setPendingUploadFiles([]);
+      setPendingUploadPrefix('');
+      setImageCompression('original');
+    },
+    [
+      bucketName,
+      connectionId,
+      currentBucket,
+      currentConnectionId,
+      currentPrefix,
+      uploadConfigError,
+      imageCompression,
+      addTask,
+      updateTask,
+      objects,
+      setObjects,
+      clearBucketSnapshots,
+      loadObjects,
+      getReadableUploadError,
+    ]
+  );
+
+  const openUploadConfigurator = React.useCallback(
+    (files: UploadDraftFile[], prefix: string) => {
+      if (files.length === 0) return;
+      setPendingUploadFiles(files);
+      setPendingUploadPrefix(prefix);
+      setImageCompression('original');
+      setShowUploadDialog(true);
+    },
+    []
+  );
+
+  const handlePickFiles = React.useCallback(async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         multiple: true,
@@ -611,104 +891,36 @@ export default function ObjectBrowserScreen() {
 
       if (result.canceled) return;
 
-      // Initialize batch tracker
-      setUploadBatch({ total: result.assets.length, completed: 0 });
-
-      for (const asset of result.assets) {
-        const key = currentPrefix + asset.name;
-        const taskId = generateId();
-        const mimeType = asset.mimeType || S3Service.guessMimeType(asset.name);
-        const fileSize = asset.size ?? 0;
-
-        const task: TransferTask = {
-          id: taskId,
-          fileName: asset.name,
-          type: 'upload',
-          status: 'active',
-          progress: 0,
-          totalBytes: fileSize,
-          transferredBytes: 0,
-          bucket: bucketName,
-          key,
-          connectionId: connectionId!,
-          localPath: asset.uri,
-          startedAt: new Date().toISOString(),
-        };
-        addTask(task);
-
-        // Simulated progress timer — gives visual feedback while native upload streams
-        let currentProgress = 5;
-        // Larger files get slower simulated progress so the bar doesn't cap out too early
-        const increment = fileSize > 10_000_000 ? 1.5 : fileSize > 1_000_000 ? 4 : 10;
-        const interval = fileSize > 10_000_000 ? 800 : 500;
-        let progressTimer: ReturnType<typeof setInterval> | null = null;
-
-        try {
-          // 1. Get presigned PUT URL (avoids loading file into JS memory)
-          const presignedUrl = await S3Service.getPresignedUploadUrl(
-            connectionId!,
-            bucketName,
-            key,
-            mimeType
-          );
-
-          updateTask(taskId, { progress: currentProgress });
-
-          // 2. Start simulated progress animation
-          progressTimer = setInterval(() => {
-            if (currentProgress < 90) {
-              currentProgress = Math.min(90, currentProgress + increment);
-            } else if (currentProgress < 99) {
-              // Slow crawl from 90→99 so the bar never appears stuck
-              currentProgress = Math.min(99, currentProgress + 0.5);
-            }
-            const estimatedBytes = Math.round((currentProgress / 100) * fileSize);
-            updateTask(taskId, {
-              progress: Math.round(currentProgress),
-              transferredBytes: estimatedBytes,
-            });
-          }, interval);
-
-          // 3. Upload file to presigned URL via expo-file-system (avoids RN fetch blob issues)
-          await FileSystem.uploadAsync(presignedUrl, asset.uri, {
-            httpMethod: 'PUT',
-            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-            headers: { 'Content-Type': mimeType },
-          });
-
-          // 4. Complete
-          if (progressTimer) clearInterval(progressTimer);
-          updateTask(taskId, {
-            progress: 100,
-            transferredBytes: fileSize,
-            status: 'completed',
-            completedAt: new Date().toISOString(),
-          });
-          setUploadBatch((prev) => (prev ? { ...prev, completed: prev.completed + 1 } : prev));
-        } catch (error: any) {
-          if (progressTimer) clearInterval(progressTimer);
-          console.error('Upload error:', error);
-          updateTask(taskId, {
-            status: 'failed',
-            error: error.message || 'Upload failed',
-          });
-          setUploadBatch((prev) => (prev ? { ...prev, completed: prev.completed + 1 } : prev));
-        }
-      }
-
-      // Refresh file listing after uploads complete (invalidate cache first)
-      invalidateBucketCache(connectionId!, bucketName);
-      setTimeout(() => {
-        void (async () => {
-          await clearBucketSnapshots(connectionId!, bucketName);
-          await loadObjects(true);
-          setUploadBatch(null);
-        })();
-      }, 1000);
+      openUploadConfigurator(result.assets.map(createUploadDraft), currentPrefix);
     } catch (error: any) {
       console.error('Document picker error:', error);
     }
-  }, [currentPrefix, bucketName, connectionId, addTask, updateTask, clearBucketSnapshots, loadObjects]);
+  }, [currentPrefix, openUploadConfigurator]);
+
+  const handlePickFromLibrary = React.useCallback(async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(t('share.error'), t('bucket.mediaPermissionDenied'));
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        allowsMultipleSelection: true,
+        quality: 1,
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+      });
+
+      if (result.canceled) return;
+
+      openUploadConfigurator(result.assets.map(createUploadDraftFromImageAsset), currentPrefix);
+    } catch (error: any) {
+      console.error('Image picker error:', error);
+      Alert.alert(t('share.error'), error?.message || t('bucket.pickMediaFailed'));
+    }
+  }, [currentPrefix, openUploadConfigurator, t]);
 
   // ── File press handler (preview for files, navigate for folders) ──────
   const handleFilePress = React.useCallback(
@@ -1020,13 +1232,25 @@ export default function ObjectBrowserScreen() {
                 <Pressable
                   onPress={() => {
                     setFabExpanded(false);
-                    handleUpload();
+                    void handlePickFromLibrary();
                   }}
                   className="bg-secondary active:bg-secondary/80 flex-row items-center gap-2 rounded-full px-4 shadow-lg shadow-black/25"
                   style={{ height: 44 }}>
-                  <Icon as={UploadIcon} className="text-secondary-foreground size-5" />
+                  <Icon as={ImageIcon} className="text-secondary-foreground size-5" />
                   <Text className="text-secondary-foreground text-sm font-medium">
-                    {t('bucket.upload')}
+                    {t('bucket.uploadPhotos')}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setFabExpanded(false);
+                    void handlePickFiles();
+                  }}
+                  className="bg-secondary active:bg-secondary/80 flex-row items-center gap-2 rounded-full px-4 shadow-lg shadow-black/25"
+                  style={{ height: 44 }}>
+                  <Icon as={FileIcon} className="text-secondary-foreground size-5" />
+                  <Text className="text-secondary-foreground text-sm font-medium">
+                    {t('bucket.uploadFiles')}
                   </Text>
                 </Pressable>
                 <Pressable
@@ -1135,6 +1359,67 @@ export default function ObjectBrowserScreen() {
               ) : (
                 <Text className="text-primary-foreground">{t('create')}</Text>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Upload Options Dialog */}
+      <Dialog
+        open={showUploadDialog}
+        onOpenChange={(open) => {
+          setShowUploadDialog(open);
+          if (!open) {
+            setPendingUploadFiles([]);
+            setPendingUploadPrefix('');
+            setImageCompression('original');
+          }
+        }}>
+        <DialogContent
+          className="sm:max-w-lg"
+          style={{
+            width: Math.min(viewportWidth - 32, 520),
+            minHeight: Math.min(Math.max(viewportHeight * 0.34, 320), 420),
+          }}>
+          <DialogHeader>
+            <DialogTitle>{t('uploadConfig.title')}</DialogTitle>
+          </DialogHeader>
+          <KeyboardAwareScrollView
+            style={{
+              height: Math.min(Math.max(viewportHeight * 0.22, 180), 280),
+            }}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            bottomOffset={24}
+            extraKeyboardSpace={insets.bottom + 16}
+            showsVerticalScrollIndicator={false}>
+            <UploadOptionsEditor
+              files={pendingUploadFiles}
+              imageCompression={imageCompression}
+              onFileNameChange={(id, name) => {
+                setPendingUploadFiles((prev) =>
+                  prev.map((file) => (file.id === id ? { ...file, name } : file))
+                );
+              }}
+              onImageCompressionChange={setImageCompression}
+              validationError={uploadConfigError}
+            />
+          </KeyboardAwareScrollView>
+          <DialogFooter className="flex-row-reverse">
+            <Button
+              onPress={() => void startUpload(pendingUploadFiles, pendingUploadPrefix)}
+              disabled={pendingUploadFiles.length === 0 || !!uploadConfigError}>
+              <Text className="text-primary-foreground">{t('uploadConfig.confirm')}</Text>
+            </Button>
+            <Button
+              variant="outline"
+              onPress={() => {
+                setShowUploadDialog(false);
+                setPendingUploadFiles([]);
+                setPendingUploadPrefix('');
+                setImageCompression('original');
+              }}>
+              <Text>{t('cancel')}</Text>
             </Button>
           </DialogFooter>
         </DialogContent>

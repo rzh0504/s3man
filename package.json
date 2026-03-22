@@ -1,7 +1,7 @@
 {
   "name": "s3man",
   "main": "expo-router/entry",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "scripts": {
     "dev": "expo start -c",
     "android": "expo start -c --android",
@@ -50,6 +50,8 @@
     "expo-document-picker": "^55.0.8",
     "expo-file-system": "^55.0.10",
     "expo-haptics": "~55.0.8",
+    "expo-image-manipulator": "~55.0.11",
+    "expo-image-picker": "~17.0.10",
     "expo-linking": "~55.0.7",
     "expo-router": "~55.0.3",
     "expo-secure-store": "^55.0.8",

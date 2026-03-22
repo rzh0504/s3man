@@ -183,6 +183,8 @@ export default {
   'bucket.download': '下载',
   'bucket.longPressHint': '长按以选择',
   'bucket.upload': '上传',
+  'bucket.uploadPhotos': '相册',
+  'bucket.uploadFiles': '文件',
   'bucket.newFolder': '新建文件夹',
   'bucket.deleteFiles': '删除文件',
   'bucket.deleteFilesDesc': '确定要删除 {count} 个文件吗？此操作不可撤销。',
@@ -199,6 +201,8 @@ export default {
   'bucket.deleteFolderDesc': '确定删除「{name}」及其所有内容吗？此操作不可撤销。',
   'bucket.createFolderFailed': '创建文件夹失败',
   'bucket.downloadFailed': '下载失败',
+  'bucket.mediaPermissionDenied': '没有相册访问权限，请先在系统设置中允许访问。',
+  'bucket.pickMediaFailed': '打开相册失败',
   'bucket.truncated': '...（已截断）',
 
   // ── 文件预览 ───────────────────────────────────────────────────────────
@@ -228,6 +232,27 @@ export default {
   'share.uploading': '上传中...',
   'share.uploadTo': '上传到 {bucket}',
   'share.selectBucket': '选择存储桶',
+
+  // ── 上传前配置 ─────────────────────────────────────────────────────────
+  'uploadConfig.title': '上传前设置',
+  'uploadConfig.description': '可在上传前重命名文件，并统一设置图片压缩。',
+  'uploadConfig.fileName': '文件名',
+  'uploadConfig.originalName': '原始文件名：{name}',
+  'uploadConfig.imageCompression': '图片压缩',
+  'uploadConfig.imageCompressionDesc':
+    '将应用到 {count} 个 JPG、PNG、WebP 图片。HEIC、HEIF、GIF、SVG 将保持原样。',
+  'uploadConfig.keepOriginal': '原图',
+  'uploadConfig.qualityHigh': '高质量',
+  'uploadConfig.qualityMedium': '平衡',
+  'uploadConfig.qualityLow': '高压缩',
+  'uploadConfig.duplicateNames': '上传列表里存在重复文件名，请调整后再继续。',
+  'uploadConfig.invalidNameEmpty': '文件名不能为空。',
+  'uploadConfig.invalidNameChars': '文件名包含非法字符。',
+  'uploadConfig.invalidNameBase': '文件名不能只有后缀，必须包含主文件名。',
+  'uploadConfig.invalidNameTrailingDot': '文件名不能以点号结尾。',
+  'uploadConfig.invalidNameExtension': '文件名缺少有效后缀。',
+  'uploadConfig.imageCompressionFailed': '图片压缩失败，请改用原图后重试。',
+  'uploadConfig.confirm': '开始上传',
 
   // ── 未找到 ─────────────────────────────────────────────────────────────
   'notFound.title': '哎呀！',
