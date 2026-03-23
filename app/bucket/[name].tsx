@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
 import { ScreenTransitionView } from '@/components/ui/screen-transition-view';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
   DialogContent,
@@ -117,6 +118,15 @@ function mergeUploadedObjects(existing: S3Object[], uploaded: S3Object[]): S3Obj
   ];
 }
 
+function mergeCreatedFolder(existing: S3Object[], createdFolder: S3Object): S3Object[] {
+  const folderEntries = existing.filter((item) => item.isFolder);
+  const fileEntries = existing.filter((item) => !item.isFolder);
+  const nextFolders = new Map(folderEntries.map((item) => [item.key, item]));
+  nextFolders.set(createdFolder.key, createdFolder);
+
+  return [...Array.from(nextFolders.values()).sort(compareObjectNames), ...fileEntries];
+}
+
 function silentlyReconcileObjects(
   connectionId: string,
   bucketName: string,
@@ -174,6 +184,28 @@ function createUploadDraftFromImageAsset(asset: ImagePicker.ImagePickerAsset): U
     size: asset.fileSize ?? undefined,
     mimeType: asset.mimeType ?? undefined,
   };
+}
+
+const FILE_LIST_SKELETON_ROWS = [220, 168, 252, 184, 232, 144, 204];
+
+function FileListSkeleton({ showGoUpRow = false }: { showGoUpRow?: boolean }) {
+  return (
+    <View className="flex-1" pointerEvents="none">
+      {showGoUpRow && (
+        <View className="flex-row items-center gap-3 px-4 py-3">
+          <Skeleton className="h-4 w-6 rounded" />
+          <Skeleton className="h-4 w-10 rounded" />
+        </View>
+      )}
+      {FILE_LIST_SKELETON_ROWS.map((width, index) => (
+        <View key={`${width}-${index}`} className="flex-row items-center gap-3 px-4 py-3">
+          <Skeleton style={{ width: 24, height: 24, borderRadius: 6 }} />
+          <Skeleton className="h-4 rounded" style={{ width, flexShrink: 1 }} />
+          <Skeleton className="h-3 w-20 rounded" />
+        </View>
+      ))}
+    </View>
+  );
 }
 
 export default function ObjectBrowserScreen() {
@@ -291,6 +323,7 @@ export default function ObjectBrowserScreen() {
   const showThumbnails = useSettingsStore((s) => s.showThumbnails);
   const downloadDirectoryUri = useSettingsStore((s) => s.downloadDirectoryUri);
   const downloadDirectoryName = useSettingsStore((s) => s.downloadDirectoryName);
+  const loadRequestIdRef = React.useRef(0);
 
   const showSystemToast = React.useCallback(
     (message: string) => {
@@ -338,6 +371,17 @@ export default function ObjectBrowserScreen() {
     return getUploadConfigErrorText(validationError);
   }, [getUploadConfigErrorText, pendingUploadFiles]);
 
+  const getHasImmediateCache = React.useCallback(
+    (prefix: string) => {
+      if (!bucketName || !connectionId) return false;
+      return (
+        hasPrefixCache(connectionId, bucketName, prefix) ||
+        S3Service.getCachedObjectList(connectionId, bucketName, prefix) !== undefined
+      );
+    },
+    [bucketName, connectionId, hasPrefixCache]
+  );
+
   React.useEffect(() => {
     if (bucketName && connectionId) {
       setCurrentBucket(connectionId, bucketName);
@@ -345,30 +389,81 @@ export default function ObjectBrowserScreen() {
   }, [bucketName, connectionId, setCurrentBucket]);
 
   React.useEffect(() => {
-    setInitialLoaded(false);
+    setInitialLoaded(getHasImmediateCache(currentPrefix));
     setThumbnailUrls({});
     setVisibleImageKeys([]);
-  }, [connectionId, bucketName, currentPrefix]);
+  }, [currentPrefix, getHasImmediateCache]);
+
+  const transitionToPrefix = React.useCallback(
+    (nextPrefix: string) => {
+      setInitialLoaded(getHasImmediateCache(nextPrefix));
+      setThumbnailUrls({});
+      setVisibleImageKeys([]);
+      setCurrentPrefix(nextPrefix);
+    },
+    [getHasImmediateCache, setCurrentPrefix]
+  );
+
+  const isLoadRequestActive = React.useCallback(
+    (
+      requestId: number,
+      targetConnectionId: string,
+      targetBucket: string,
+      targetPrefix: string
+    ) => {
+      const state = useObjectStore.getState();
+      return (
+        loadRequestIdRef.current === requestId &&
+        state.currentConnectionId === targetConnectionId &&
+        state.currentBucket === targetBucket &&
+        state.currentPrefix === targetPrefix
+      );
+    },
+    []
+  );
 
   const loadObjects = React.useCallback(
     async (forceRefresh = false) => {
       if (!bucketName || !connectionId) return;
-      if (currentConnectionId !== connectionId || currentBucket !== bucketName) return;
+      const targetConnectionId = connectionId;
+      const targetBucket = bucketName;
+      const targetPrefix = currentPrefix;
 
-      const hasStoreCache = hasPrefixCache(connectionId, bucketName, currentPrefix);
+      if (currentConnectionId !== targetConnectionId || currentBucket !== targetBucket) return;
+
+      const requestId = ++loadRequestIdRef.current;
+      let hasImmediateData = false;
+
+      const hasStoreCache = hasPrefixCache(targetConnectionId, targetBucket, targetPrefix);
 
       if (!forceRefresh) {
         if (hasStoreCache) {
-          setInitialLoaded(true);
-        } else {
-          const cacheResult = await loadCachedObjects(connectionId);
-          if (cacheResult.hit) {
+          hasImmediateData = true;
+          if (isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
             setInitialLoaded(true);
+            setLoading(false);
+          }
+        } else {
+          const cacheResult = await loadCachedObjects(targetConnectionId);
+          if (!isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
+            return;
+          }
+
+          if (cacheResult.hit) {
+            hasImmediateData = true;
+            setInitialLoaded(true);
+            setLoading(false);
           } else {
-            const ttlCached = S3Service.getCachedObjectList(connectionId, bucketName, currentPrefix);
+            const ttlCached = S3Service.getCachedObjectList(
+              targetConnectionId,
+              targetBucket,
+              targetPrefix
+            );
             if (ttlCached !== undefined) {
+              hasImmediateData = true;
               setObjects(ttlCached, { persist: false });
               setInitialLoaded(true);
+              setLoading(false);
             } else {
               setInitialLoaded(false);
               setLoading(true);
@@ -377,26 +472,49 @@ export default function ObjectBrowserScreen() {
         }
 
         try {
-          const fresh = await S3Service.listObjectsFresh(connectionId, bucketName, currentPrefix);
+          const fresh = await S3Service.listObjectsFresh(
+            targetConnectionId,
+            targetBucket,
+            targetPrefix
+          );
+          if (!isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
+            return;
+          }
           setObjects(fresh);
         } catch (error: any) {
-          if (!hasStoreCache) {
+          if (
+            !hasImmediateData &&
+            isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)
+          ) {
             console.error('Failed to load objects:', error);
           }
         } finally {
-          setLoading(false);
-          setInitialLoaded(true);
+          if (isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
+            setLoading(false);
+            setInitialLoaded(true);
+          }
         }
       } else {
         setLoading(true);
         try {
-          const fresh = await S3Service.listObjectsFresh(connectionId, bucketName, currentPrefix);
+          const fresh = await S3Service.listObjectsFresh(
+            targetConnectionId,
+            targetBucket,
+            targetPrefix
+          );
+          if (!isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
+            return;
+          }
           setObjects(fresh);
         } catch (error: any) {
-          console.error('Failed to load objects:', error);
+          if (isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
+            console.error('Failed to load objects:', error);
+          }
         } finally {
-          setLoading(false);
-          setInitialLoaded(true);
+          if (isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
+            setLoading(false);
+            setInitialLoaded(true);
+          }
         }
       }
     },
@@ -410,6 +528,7 @@ export default function ObjectBrowserScreen() {
       setObjects,
       loadCachedObjects,
       setLoading,
+      isLoadRequestActive,
     ]
   );
 
@@ -467,9 +586,9 @@ export default function ObjectBrowserScreen() {
 
   const handleFolderPress = React.useCallback(
     (folder: S3Object) => {
-      setCurrentPrefix(folder.key);
+      transitionToPrefix(folder.key);
     },
-    [setCurrentPrefix]
+    [transitionToPrefix]
   );
 
   const handleFolderLongPress = React.useCallback((folder: S3Object) => {
@@ -483,19 +602,46 @@ export default function ObjectBrowserScreen() {
     setIsCreatingFolder(true);
     setCreateFolderError('');
     try {
-      const folderKey = currentPrefix + newFolderName.trim().replace(/\/$/, '') + '/';
+      const targetPrefix = currentPrefix;
+      const normalizedFolderName = newFolderName.trim().replace(/\/$/, '');
+      const folderKey = targetPrefix + normalizedFolderName + '/';
       await S3Service.putEmptyObject(connectionId, bucketName, folderKey);
       setNewFolderName('');
       setShowCreateFolderDialog(false);
       invalidateBucketCache(connectionId, bucketName);
-      await clearBucketSnapshots(connectionId, bucketName);
-      await loadObjects(true);
+      const state = useObjectStore.getState();
+      const canIncrementallyRefresh =
+        state.currentConnectionId === connectionId &&
+        state.currentBucket === bucketName &&
+        state.currentPrefix === targetPrefix;
+
+      if (canIncrementallyRefresh) {
+        setObjects(
+          mergeCreatedFolder(state.objects, {
+            key: folderKey,
+            name: normalizedFolderName,
+            isFolder: true,
+          })
+        );
+        silentlyReconcileObjects(connectionId, bucketName, targetPrefix);
+      } else {
+        await clearBucketSnapshots(connectionId, bucketName);
+        await loadObjects(true);
+      }
     } catch (error: any) {
       setCreateFolderError(error.message || 'Failed to create folder');
     } finally {
       setIsCreatingFolder(false);
     }
-  }, [newFolderName, bucketName, connectionId, currentPrefix, clearBucketSnapshots, loadObjects]);
+  }, [
+    newFolderName,
+    bucketName,
+    connectionId,
+    currentPrefix,
+    setObjects,
+    clearBucketSnapshots,
+    loadObjects,
+  ]);
 
   // ── Delete folder ──────────────────────────────────────────────────────
   const confirmDeleteFolder = React.useCallback(async () => {
@@ -538,14 +684,14 @@ export default function ObjectBrowserScreen() {
   const handleGoUp = React.useCallback(() => {
     const parts = currentPrefix.split('/').filter(Boolean);
     parts.pop();
-    setCurrentPrefix(parts.length > 0 ? parts.join('/') + '/' : '');
-  }, [currentPrefix, setCurrentPrefix]);
+    transitionToPrefix(parts.length > 0 ? parts.join('/') + '/' : '');
+  }, [currentPrefix, transitionToPrefix]);
 
   const handleBreadcrumbPress = React.useCallback(
     (prefix: string) => {
-      setCurrentPrefix(prefix);
+      transitionToPrefix(prefix);
     },
-    [setCurrentPrefix]
+    [transitionToPrefix]
   );
 
   // ── Preview ──────────────────────────────────────────────────────────────
@@ -1100,49 +1246,56 @@ export default function ObjectBrowserScreen() {
       <Separator />
 
       {/* Object List */}
-      {initialLoaded ? (
-        <NativeOnlyAnimatedView entering={fadeIn(80)} className="flex-1">
-          <FlatList
-            data={listData}
-            keyExtractor={(item) => item.key}
-            initialNumToRender={12}
-            maxToRenderPerBatch={12}
-            windowSize={5}
-            removeClippedSubviews={Platform.OS !== 'web'}
-            onViewableItemsChanged={onViewableItemsChanged}
-            viewabilityConfig={viewabilityConfig}
-            renderItem={({ item }) => {
-              if (item.key === '__go_up__') {
-                return (
-                  <Pressable
-                    onPress={handleGoUp}
-                    className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
-                    <Icon as={ChevronLeftIcon} className="text-muted-foreground size-5" />
-                    <Text className="text-foreground">..</Text>
-                  </Pressable>
-                );
+      <View className="flex-1">
+        <NativeOnlyAnimatedView
+          key={`${currentPrefix || '__root__'}:${initialLoaded ? 'loaded' : 'loading'}`}
+          entering={fadeIn(40)}
+          exiting={fadeOut()}
+          className="flex-1">
+          {initialLoaded ? (
+            <FlatList
+              key={currentPrefix || '__root__'}
+              data={listData}
+              keyExtractor={(item) => item.key}
+              initialNumToRender={12}
+              maxToRenderPerBatch={12}
+              windowSize={5}
+              removeClippedSubviews={Platform.OS !== 'web'}
+              onViewableItemsChanged={onViewableItemsChanged}
+              viewabilityConfig={viewabilityConfig}
+              renderItem={({ item }) => {
+                if (item.key === '__go_up__') {
+                  return (
+                    <Pressable
+                      onPress={handleGoUp}
+                      className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
+                      <Icon as={ChevronLeftIcon} className="text-muted-foreground size-5" />
+                      <Text className="text-foreground">..</Text>
+                    </Pressable>
+                  );
+                }
+                return renderItem({ item });
+              }}
+              refreshControl={
+                <RefreshControl
+                  refreshing={initialLoaded && isLoading}
+                  onRefresh={() => loadObjects(true)}
+                />
               }
-              return renderItem({ item });
-            }}
-            refreshControl={
-              <RefreshControl
-                refreshing={initialLoaded && isLoading}
-                onRefresh={() => loadObjects(true)}
-              />
-            }
-            contentContainerClassName="pb-24"
-            ListEmptyComponent={
-              <EmptyState
-                icon={FolderIcon}
-                title={t('bucket.empty')}
-                description={t('bucket.emptyDesc')}
-              />
-            }
-          />
+              contentContainerClassName="pb-24"
+              ListEmptyComponent={
+                <EmptyState
+                  icon={FolderIcon}
+                  title={t('bucket.empty')}
+                  description={t('bucket.emptyDesc')}
+                />
+              }
+            />
+          ) : (
+            <FileListSkeleton showGoUpRow={currentPrefix !== ''} />
+          )}
         </NativeOnlyAnimatedView>
-      ) : (
-        <View className="flex-1" />
-      )}
+      </View>
 
       {/* Upload Progress Overlay */}
       {uploadProgress && (
@@ -1322,7 +1475,11 @@ export default function ObjectBrowserScreen() {
 
       {/* Create Folder Dialog */}
       <Dialog open={showCreateFolderDialog} onOpenChange={setShowCreateFolderDialog}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent
+          className="sm:max-w-md"
+          style={{
+            width: Math.min(viewportWidth - 32, 520),
+          }}>
           <DialogHeader>
             <DialogTitle>{t('bucket.createFolder')}</DialogTitle>
             <DialogDescription>{t('bucket.createFolderDesc')}</DialogDescription>

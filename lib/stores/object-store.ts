@@ -448,26 +448,40 @@ export const useObjectStore = create<ObjectState>((set, get) => ({
 
   loadCachedObjects: async (connectionId) => {
     const state = get();
+    const targetBucket = state.currentBucket;
+    const targetPrefix = state.currentPrefix;
+
     if (
       state.currentConnectionId === connectionId &&
-      state._prefixCache.has(
-        _buildPrefixCacheKey(connectionId, state.currentBucket, state.currentPrefix)
-      )
+      state._prefixCache.has(_buildPrefixCacheKey(connectionId, targetBucket, targetPrefix))
     ) {
       return { hit: true, source: 'memory' };
     }
 
-    if (!state.currentBucket) {
+    if (!targetBucket) {
       return { hit: false, source: 'none' };
     }
 
-    const snapshot = await _readSnapshot(connectionId, state.currentBucket, state.currentPrefix);
+    const snapshot = await _readSnapshot(connectionId, targetBucket, targetPrefix);
     if (!snapshot) {
       return { hit: false, source: 'none' };
     }
 
+    const latestState = get();
+    if (
+      latestState.currentConnectionId !== connectionId ||
+      latestState.currentBucket !== targetBucket ||
+      latestState.currentPrefix !== targetPrefix
+    ) {
+      return {
+        hit: true,
+        cachedAt: snapshot.cachedAt,
+        source: 'disk',
+      };
+    }
+
     const cacheKey = _cacheSnapshotKey(snapshot);
-    state._prefixCache.set(cacheKey, snapshot.objects);
+    latestState._prefixCache.set(cacheKey, snapshot.objects);
     set({ objects: snapshot.objects });
     void _touchSnapshotAccess(
       snapshot.connectionId,

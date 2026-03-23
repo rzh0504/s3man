@@ -1,5 +1,4 @@
 import { Button } from '@/components/ui/button';
-import { useIsFocused } from '@react-navigation/native';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
@@ -183,7 +182,6 @@ export default function BucketIndexScreen() {
   const [createForConnectionId, setCreateForConnectionId] = React.useState<string | null>(null);
   const [initialLoaded, setInitialLoaded] = React.useState(false);
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
-  const isFocused = useIsFocused();
 
   // Delete bucket state
   const [deleteBucketTarget, setDeleteBucketTarget] = React.useState<BucketInfo | null>(null);
@@ -287,12 +285,6 @@ export default function BucketIndexScreen() {
   const indicatorOffset = useSharedValue(0);
   const indicatorWidth = useSharedValue(0);
   const activeTabLayout = tabLayouts[activeProvider];
-
-  React.useLayoutEffect(() => {
-    if (isFocused) {
-      setExpandedIds(new Set());
-    }
-  }, [isFocused]);
 
   React.useEffect(() => {
     if (!activeTabLayout) return;
