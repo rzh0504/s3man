@@ -80,6 +80,8 @@ export default {
   'conn.connect': '连接',
   'conn.connecting': '连接中...',
   'conn.connected': '已连接',
+  'conn.reconnect': '重新连接',
+  'conn.showErrorDetails': '查看错误详情',
   'conn.deleteTitle': '删除连接',
   'conn.deleteDesc': '确定要删除「{name}」吗？此操作不可撤销。',
 
@@ -210,6 +212,9 @@ export default {
   'preview.downloadFile': '下载文件',
   'preview.pdfHint': 'PDF 文件可在浏览器中查看。',
   'preview.openInBrowser': '在浏览器中打开',
+  'preview.audioReady': '音频已准备好，可直接播放预览。',
+  'preview.playAudio': '播放音频',
+  'preview.pauseAudio': '暂停音频',
 
   // ── 分享上传 ───────────────────────────────────────────────────────────
   'share.noFiles': '没有可上传的文件',

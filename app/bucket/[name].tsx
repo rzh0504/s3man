@@ -714,7 +714,11 @@ export default function ObjectBrowserScreen() {
       try {
         const url = await S3Service.getFileUrl(connectionId, bucketName, obj.key);
 
-        if (S3Service.isImageFile(obj.name) || S3Service.isVideoFile(obj.name)) {
+        if (
+          S3Service.isImageFile(obj.name) ||
+          S3Service.isAudioFile(obj.name) ||
+          S3Service.isVideoFile(obj.name)
+        ) {
           setPreviewUrl(url);
         } else if (S3Service.isPdfFile(obj.name)) {
           // PDF: store the URL so preview can offer "open in browser"

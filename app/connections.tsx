@@ -20,6 +20,7 @@ import { Separator } from '@/components/ui/separator';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import { InfoTooltip } from '@/components/info-tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useConnectionStore } from '@/lib/stores/connection-store';
 import * as S3Service from '@/lib/s3-service';
 import { PROVIDERS, getProvider, getRegionLabel, buildEndpointUrl } from '@/lib/constants';
@@ -35,6 +36,7 @@ import {
   RefreshCwIcon,
   XIcon,
   WifiIcon,
+  CircleAlertIcon,
   WifiOffIcon,
   SearchIcon,
   FolderIcon,
@@ -98,104 +100,107 @@ function FieldLabel({
 
 function ConnectionCard({
   conn,
-  index,
   onEdit,
   onDelete,
   onReconnect,
 }: {
   conn: S3Connection;
-  index: number;
   onEdit: () => void;
   onDelete: () => void;
   onReconnect: () => void;
 }) {
   const providerInfo = getProvider(conn.config.provider);
   const t = useT();
+  const subtitle = `${providerInfo.label} · ${getRegionLabel(conn.config.region, conn.config.provider)}`;
 
-  const statusColor =
+  const statusMeta =
     conn.status === 'connected'
-      ? 'bg-green-500'
+      ? {
+          icon: WifiIcon,
+          iconClassName: 'text-green-600',
+          accessibilityLabel: t('conn.connected'),
+          disabled: true,
+        }
       : conn.status === 'connecting'
-        ? 'bg-yellow-500'
+        ? {
+            icon: RefreshCwIcon,
+            iconClassName: 'text-amber-500',
+            accessibilityLabel: t('conn.connecting'),
+            disabled: true,
+            spinning: true,
+          }
         : conn.status === 'error'
-          ? 'bg-red-500'
-          : 'bg-muted-foreground';
+          ? {
+              icon: CircleAlertIcon,
+              iconClassName: 'text-destructive',
+              accessibilityLabel: t('conn.reconnect'),
+              disabled: false,
+            }
+          : {
+              icon: WifiOffIcon,
+              iconClassName: 'text-muted-foreground',
+              accessibilityLabel: t('conn.reconnect'),
+              disabled: false,
+            };
 
-  const statusLabel =
-    conn.status === 'connected'
-      ? t('conn.connected')
-      : conn.status === 'connecting'
-        ? t('conn.connecting')
-        : conn.status === 'error'
-          ? t('conn.statusError')
-          : t('conn.statusOffline');
+  const statusButton = (
+    <Pressable
+      onPress={statusMeta.disabled ? undefined : onReconnect}
+      disabled={statusMeta.disabled}
+      accessibilityRole="button"
+      accessibilityLabel={statusMeta.accessibilityLabel}
+      accessibilityHint={
+        conn.status === 'error' && conn.errorMessage ? t('conn.showErrorDetails') : undefined
+      }
+      className={`h-8 w-8 items-center justify-center rounded-full ${
+        statusMeta.disabled ? 'opacity-90' : 'active:opacity-70'
+      }`}>
+      <Icon
+        as={statusMeta.icon}
+        className={`size-4.5 ${statusMeta.iconClassName} ${statusMeta.spinning ? 'animate-spin' : ''}`}
+      />
+    </Pressable>
+  );
 
   return (
-    <View className="border-border bg-card rounded-xl border p-4">
+    <View className="border-border bg-card rounded-xl border px-3 py-3">
       <View className="flex-row items-center gap-3">
-        <ProviderIcon provider={conn.config.provider} size={28} />
-        <View className="flex-1">
-          <Text className="text-foreground text-base font-semibold" numberOfLines={1}>
+        <View className="h-9 w-9 items-center justify-center">
+          <ProviderIcon provider={conn.config.provider} size={22} />
+        </View>
+        <View className="min-w-0 flex-1 gap-0.5">
+          <Text className="text-foreground text-sm font-semibold" numberOfLines={1}>
             {conn.displayName}
           </Text>
           <Text className="text-muted-foreground text-xs" numberOfLines={1}>
-            {providerInfo.label} · {getRegionLabel(conn.config.region, conn.config.provider)}
+            {subtitle}
           </Text>
         </View>
-        <View className="flex-row items-center gap-1.5">
-          <View className={`h-2 w-2 rounded-full ${statusColor}`} />
-          <Text
-            className={`text-xs font-medium ${
-              conn.status === 'connected'
-                ? 'text-green-600'
-                : conn.status === 'error'
-                  ? 'text-red-500'
-                  : 'text-muted-foreground'
-            }`}>
-            {statusLabel}
-          </Text>
+        <View className="flex-row items-center gap-1">
+          {conn.status === 'error' && conn.errorMessage ? (
+            <Tooltip delayDuration={0}>
+              <TooltipTrigger asChild>{statusButton}</TooltipTrigger>
+              <TooltipContent className="max-w-80">
+                <Text className="text-foreground text-xs leading-5">{conn.errorMessage}</Text>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            statusButton
+          )}
         </View>
-      </View>
-
-      {conn.status === 'error' && conn.errorMessage ? (
-        <View className="bg-destructive/10 mt-2 rounded-md p-2">
-          <Text className="text-destructive text-xs" numberOfLines={2}>
-            {conn.errorMessage}
-          </Text>
-        </View>
-      ) : null}
-
-      <View className="mt-3 flex-row items-center gap-2">
-        {conn.status !== 'connected' && conn.status !== 'connecting' && (
-          <Pressable
-            onPress={onReconnect}
-            className="bg-primary flex-1 flex-row items-center justify-center gap-1.5 rounded-md py-2">
-            <Icon as={RefreshCwIcon} className="text-primary-foreground size-3.5" />
-            <Text className="text-primary-foreground text-xs font-medium">{t('conn.connect')}</Text>
-          </Pressable>
-        )}
-        {conn.status === 'connecting' && (
-          <View className="bg-muted flex-1 flex-row items-center justify-center gap-1.5 rounded-md py-2">
-            <ActivityIndicator size="small" />
-            <Text className="text-muted-foreground text-xs">{t('conn.connecting')}</Text>
-          </View>
-        )}
-        {conn.status === 'connected' && (
-          <View className="bg-muted flex-1 flex-row items-center justify-center gap-1.5 rounded-md py-2">
-            <Icon as={WifiIcon} className="size-3.5 text-green-600" />
-            <Text className="text-xs font-medium text-green-600">{t('conn.connected')}</Text>
-          </View>
-        )}
         <Pressable
           onPress={onEdit}
-          className="border-border flex-row items-center gap-1.5 rounded-md border px-3 py-2">
-          <Icon as={PencilIcon} className="text-muted-foreground size-3.5" />
-          <Text className="text-foreground text-xs">{t('edit')}</Text>
+          accessibilityRole="button"
+          accessibilityLabel={t('edit')}
+          className="h-8 w-8 items-center justify-center rounded-full active:opacity-70">
+          <Icon as={PencilIcon} className="text-muted-foreground size-4" />
         </Pressable>
         <Pressable
           onPress={onDelete}
-          className="border-border flex-row items-center gap-1.5 rounded-md border px-3 py-2">
-          <Icon as={TrashIcon} className="text-destructive size-3.5" />
+          accessibilityRole="button"
+          accessibilityLabel={t('delete')}
+          className="h-8 w-8 items-center justify-center rounded-full active:opacity-70">
+          <Icon as={TrashIcon} className="text-destructive size-4" />
         </Pressable>
       </View>
     </View>
@@ -1035,11 +1040,10 @@ export default function ConnectionsScreen() {
           </View>
         ) : (
           <View className="gap-3">
-            {connections.map((conn, index) => (
+            {connections.map((conn) => (
               <ConnectionCard
                 key={conn.id}
                 conn={conn}
-                index={index}
                 onEdit={() => openEditForm(conn)}
                 onDelete={() => handleDelete(conn)}
                 onReconnect={() => connectOne(conn.id)}

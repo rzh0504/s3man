@@ -84,6 +84,8 @@ export default {
   'conn.connect': 'Connect',
   'conn.connecting': 'Connecting...',
   'conn.connected': 'Connected',
+  'conn.reconnect': 'Reconnect',
+  'conn.showErrorDetails': 'Show error details',
   'conn.deleteTitle': 'Delete Connection',
   'conn.deleteDesc': 'Remove "{name}"? This cannot be undone.',
 
@@ -215,6 +217,9 @@ export default {
   'preview.downloadFile': 'Download File',
   'preview.pdfHint': 'PDF files can be viewed in your browser.',
   'preview.openInBrowser': 'Open in Browser',
+  'preview.audioReady': 'Audio is ready to preview.',
+  'preview.playAudio': 'Play audio',
+  'preview.pauseAudio': 'Pause audio',
 
   // ── Handle Share ───────────────────────────────────────────────────────
   'share.noFiles': 'No files to upload',

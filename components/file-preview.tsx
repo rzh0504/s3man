@@ -3,15 +3,34 @@ import { Text } from '@/components/ui/text';
 import { Button } from '@/components/ui/button';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { formatBytes } from '@/lib/constants';
-import { isImageFile, isVideoFile, isCodeFile, isPdfFile } from '@/lib/s3-service';
+import { isAudioFile, isImageFile, isVideoFile, isCodeFile, isPdfFile } from '@/lib/s3-service';
 import type { S3Object } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
-import { XIcon, DownloadIcon, ExternalLinkIcon, LinkIcon, GlobeIcon } from 'lucide-react-native';
+import { Progress } from '@/components/ui/progress';
+import { useEvent } from 'expo';
+import {
+  XIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  LinkIcon,
+  GlobeIcon,
+  PlayIcon,
+  PauseIcon,
+} from 'lucide-react-native';
 import * as React from 'react';
-import { View, Modal, Pressable, Image, ScrollView, Dimensions, Platform } from 'react-native';
+import {
+  View,
+  Modal,
+  Pressable,
+  Image,
+  ScrollView,
+  Dimensions,
+  Platform,
+  ActivityIndicator,
+} from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { createVideoPlayer, useVideoPlayer, VideoView } from 'expo-video';
 import * as Linking from 'expo-linking';
 import { t } from '@/lib/i18n';
 import Animated, {
@@ -38,6 +57,20 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MAX_PREVIEW_WIDTH = SCREEN_WIDTH - 32;
 const SHEET_HEIGHT_SMALL = 280;
 const SHEET_HEIGHT_MEDIUM = Math.round(SCREEN_HEIGHT * 0.7);
+
+function formatAudioTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const totalSeconds = Math.floor(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainingSeconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+}
 
 // ── Video Player Sub-component ──────────────────────────────────────────
 
@@ -102,6 +135,116 @@ function ImagePreview({ url }: { url: string }) {
   );
 }
 
+function PreviewUnavailable({ onDownload }: { onDownload: () => void }) {
+  return (
+    <View className="items-center gap-3 p-8">
+      <Icon as={ExternalLinkIcon} className="text-muted-foreground size-12" />
+      <Text className="text-muted-foreground text-center text-sm">{t('preview.notAvailable')}</Text>
+      <Button onPress={onDownload} className="mt-2 flex-row items-center gap-2">
+        <Icon as={DownloadIcon} className="text-primary-foreground size-4" />
+        <Text className="text-primary-foreground">{t('preview.downloadFile')}</Text>
+      </Button>
+    </View>
+  );
+}
+
+function AudioPreview({
+  url,
+  onDownload,
+}: {
+  url: string;
+  onDownload: () => void;
+}) {
+  const player = React.useMemo(() => {
+    const videoPlayer = createVideoPlayer({ uri: url });
+    videoPlayer.loop = false;
+    videoPlayer.timeUpdateEventInterval = 0.25;
+    videoPlayer.showNowPlayingNotification = false;
+    videoPlayer.staysActiveInBackground = false;
+    return videoPlayer;
+  }, [url]);
+  const { status, error } = useEvent(player, 'statusChange', {
+    status: player.status,
+    error: undefined,
+  });
+  const { isPlaying } = useEvent(player, 'playingChange', {
+    isPlaying: player.playing,
+  });
+  const { currentTime } = useEvent(player, 'timeUpdate', {
+    currentTime: player.currentTime,
+    currentLiveTimestamp: player.currentLiveTimestamp,
+    currentOffsetFromLive: player.currentOffsetFromLive,
+    bufferedPosition: player.bufferedPosition,
+  });
+
+  const duration = player.duration > 0 ? player.duration : 0;
+  const safeCurrentTime = Math.min(currentTime ?? player.currentTime, duration || player.currentTime);
+  const progress = duration > 0 ? Math.min((safeCurrentTime / duration) * 100, 100) : 0;
+  const isUnavailable = status === 'error';
+  const isLoading = status === 'loading' || status === 'idle';
+
+  const togglePlayback = React.useCallback(() => {
+    if (isPlaying) {
+      try {
+        player.pause();
+      } catch {}
+      return;
+    }
+
+    if (duration > 0 && safeCurrentTime >= duration) {
+      try {
+        player.replay();
+      } catch {}
+      return;
+    }
+
+    try {
+      player.play();
+    } catch {}
+  }, [duration, isPlaying, player, safeCurrentTime]);
+
+  if (isUnavailable) {
+    return <PreviewUnavailable onDownload={onDownload} />;
+  }
+
+  return (
+    <View className="w-full items-center justify-center gap-5 px-5 py-6">
+      <View className="w-full gap-3">
+        <Progress value={progress} className="h-2" indicatorClassName="bg-primary" />
+        <View className="flex-row items-center justify-between">
+          <Text className="text-muted-foreground text-xs">{formatAudioTime(safeCurrentTime)}</Text>
+          <Text className="text-muted-foreground text-xs">{formatAudioTime(duration)}</Text>
+        </View>
+      </View>
+
+      <View className="flex-row items-center gap-3">
+        <Pressable
+          onPress={togglePlayback}
+          disabled={isLoading}
+          accessibilityRole="button"
+          accessibilityLabel={isPlaying ? t('preview.pauseAudio') : t('preview.playAudio')}
+          className={`min-h-11 min-w-11 items-center justify-center ${
+            isLoading ? 'opacity-70' : 'active:opacity-70'
+          }`}>
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#6b7280" />
+          ) : (
+            <Icon
+              as={isPlaying ? PauseIcon : PlayIcon}
+              className="text-foreground size-8"
+              strokeWidth={1.5}
+            />
+          )}
+        </Pressable>
+      </View>
+
+      {error?.message ? (
+        <Text className="text-muted-foreground text-center text-xs">{error.message}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 // ── Main FilePreview ────────────────────────────────────────────────────
 
 export function FilePreview({
@@ -117,10 +260,12 @@ export function FilePreview({
   const insets = useSafeAreaInsets();
 
   const isImage = object ? isImageFile(object.name) : false;
+  const isAudio = object ? isAudioFile(object.name) : false;
   const isVideo = object ? isVideoFile(object.name) : false;
   const isCode = object ? isCodeFile(object.name) : false;
   const isPdf = object ? isPdfFile(object.name) : false;
-  const hasPreviewContent = isImage || isVideo || isCode || isPdf || textContent !== null;
+  const hasPreviewContent =
+    isImage || isAudio || isVideo || isCode || isPdf || textContent !== null;
 
   const sheetHeight = React.useMemo(() => {
     if (isLoading) return SHEET_HEIGHT_MEDIUM;
@@ -241,6 +386,8 @@ export function FilePreview({
               )
             ) : isImage && previewUrl ? (
               <ImagePreview url={previewUrl} />
+            ) : isAudio && previewUrl ? (
+              <AudioPreview url={previewUrl} onDownload={onDownload} />
             ) : isVideo && previewUrl ? (
               <VideoPreview url={previewUrl} />
             ) : isPdf && previewUrl ? (
@@ -270,16 +417,7 @@ export function FilePreview({
                 </View>
               </ScrollView>
             ) : (
-              <View className="items-center gap-3 p-8">
-                <Icon as={ExternalLinkIcon} className="text-muted-foreground size-12" />
-                <Text className="text-muted-foreground text-center text-sm">
-                  {t('preview.notAvailable')}
-                </Text>
-                <Button onPress={onDownload} className="mt-2 flex-row items-center gap-2">
-                  <Icon as={DownloadIcon} className="text-primary-foreground size-4" />
-                  <Text className="text-primary-foreground">{t('preview.downloadFile')}</Text>
-                </Button>
-              </View>
+              <PreviewUnavailable onDownload={onDownload} />
             )}
           </View>
         </View>

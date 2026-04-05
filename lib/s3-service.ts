@@ -653,11 +653,12 @@ export function guessMimeType(fileName: string): string {
   return mimeMap[ext] || 'application/octet-stream';
 }
 
-/** Check if a file is previewable (image, video, text/code, or PDF) */
+/** Check if a file is previewable (image, audio, video, text/code, or PDF) */
 export function isPreviewable(fileName: string): boolean {
   const mime = guessMimeType(fileName);
   return (
     mime.startsWith('image/') ||
+    mime.startsWith('audio/') ||
     mime.startsWith('video/') ||
     mime.startsWith('text/') ||
     mime === 'application/json' ||

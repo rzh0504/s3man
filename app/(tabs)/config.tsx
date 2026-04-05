@@ -19,6 +19,8 @@ import {
   MoonIcon,
   WifiIcon,
   LanguagesIcon,
+  FolderOpenIcon,
+  RotateCcwIcon,
 } from 'lucide-react-native';
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -90,9 +92,32 @@ export default function ConfigScreen() {
   );
 
   const downloadDirectoryLabel = React.useMemo(() => {
-    if (downloadDirectoryName) return formatDownloadDirectoryLabel(downloadDirectoryName);
-    if (downloadDirectoryUri) return formatDownloadDirectoryLabel(downloadDirectoryUri);
-    return t('settings.downloadDirectoryDefault');
+    const rawLabel = downloadDirectoryName
+      ? formatDownloadDirectoryLabel(downloadDirectoryName)
+      : downloadDirectoryUri
+        ? formatDownloadDirectoryLabel(downloadDirectoryUri)
+        : t('settings.downloadDirectoryDefault');
+
+    const parts = rawLabel
+      .split(' / ')
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+
+    if (parts.length > 0 && rawLabel !== t('settings.downloadDirectoryDefault')) {
+      return parts[parts.length - 1];
+    }
+
+    if (rawLabel.includes('/')) {
+      const normalizedParts = rawLabel
+        .split('/')
+        .map((segment) => segment.trim())
+        .filter(Boolean);
+      if (normalizedParts.length > 0 && rawLabel !== t('settings.downloadDirectoryDefault')) {
+        return normalizedParts[normalizedParts.length - 1];
+      }
+    }
+
+    return rawLabel;
   }, [downloadDirectoryName, downloadDirectoryUri, t]);
 
   const handlePickDownloadDirectory = React.useCallback(async () => {
@@ -245,34 +270,33 @@ export default function ConfigScreen() {
             <Separator />
 
             {/* Download Directory */}
-            <View className="px-4 py-3.5">
-              <View className="flex-row items-center justify-between gap-3">
+            <View className="flex-row items-center gap-3 px-4 py-3.5">
+              <View className="flex-1">
                 <Text className="text-foreground text-sm font-medium">
                   {t('settings.downloadDirectory')}
                 </Text>
-                <Text
-                  numberOfLines={1}
-                  className="text-muted-foreground max-w-52 flex-1 text-right text-sm">
-                  {downloadDirectoryLabel}
-                </Text>
               </View>
-
+              <Text
+                numberOfLines={1}
+                className="text-muted-foreground max-w-64 flex-1 text-right text-sm">
+                {downloadDirectoryLabel}
+              </Text>
               {Platform.OS === 'android' ? (
-                <View className="mt-3 flex-row gap-2">
+                <View className="flex-row items-center gap-1">
                   <Pressable
                     onPress={handlePickDownloadDirectory}
-                    className="bg-secondary active:bg-secondary/80 rounded-lg px-3 py-2">
-                    <Text className="text-secondary-foreground text-sm font-medium">
-                      {t('settings.chooseDownloadDirectory')}
-                    </Text>
+                    className="active:bg-accent -my-2 rounded-full p-2"
+                    accessibilityRole="button"
+                    accessibilityLabel={t('settings.chooseDownloadDirectory')}>
+                    <Icon as={FolderOpenIcon} className="text-muted-foreground size-5" />
                   </Pressable>
                   {downloadDirectoryUri ? (
                     <Pressable
                       onPress={handleResetDownloadDirectory}
-                      className="border-border active:bg-accent rounded-lg border px-3 py-2">
-                      <Text className="text-foreground text-sm font-medium">
-                        {t('settings.resetDownloadDirectory')}
-                      </Text>
+                      className="active:bg-accent -my-2 rounded-full p-2"
+                      accessibilityRole="button"
+                      accessibilityLabel={t('settings.resetDownloadDirectory')}>
+                      <Icon as={RotateCcwIcon} className="text-muted-foreground size-5" />
                     </Pressable>
                   ) : null}
                 </View>
