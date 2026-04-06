@@ -1,3 +1,13 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { fadeIn } from '@/components/ui/fade-motion';
 import { Icon } from '@/components/ui/icon';
@@ -50,6 +60,8 @@ const TRANSFER_HISTORY_LABELS: Record<(typeof TRANSFER_HISTORY_OPTIONS)[number],
   7: 'settings.transferHistory7d',
 };
 
+type UpdateDialogMode = 'download' | 'install' | null;
+
 export default function ConfigScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -76,6 +88,7 @@ export default function ConfigScreen() {
   const checkForUpdates = useAppUpdateStore((s) => s.checkForUpdates);
   const downloadAvailableUpdate = useAppUpdateStore((s) => s.downloadAvailableUpdate);
   const installAvailableUpdate = useAppUpdateStore((s) => s.installAvailableUpdate);
+  const [updateDialogMode, setUpdateDialogMode] = React.useState<UpdateDialogMode>(null);
 
   const connectedCount = connections.filter((c) => c.status === 'connected').length;
   const canUseInAppUpdates = Platform.OS === 'android';
@@ -200,6 +213,7 @@ export default function ConfigScreen() {
 
   const handleInstallAppUpdate = React.useCallback(async () => {
     try {
+      setUpdateDialogMode(null);
       await installAvailableUpdate();
     } catch (error) {
       const message =
@@ -214,19 +228,9 @@ export default function ConfigScreen() {
 
   const handleDownloadAppUpdate = React.useCallback(async () => {
     try {
+      setUpdateDialogMode(null);
       await downloadAvailableUpdate();
-      Alert.alert(t('settings.appUpdates'), t('settings.updateReadyToInstall'), [
-        {
-          text: t('settings.updatePromptLater'),
-          style: 'cancel',
-        },
-        {
-          text: t('settings.installUpdate'),
-          onPress: () => {
-            void handleInstallAppUpdate();
-          },
-        },
-      ]);
+      setUpdateDialogMode('install');
     } catch (error) {
       showSystemToast(error instanceof Error ? error.message : t('settings.updateDownloadFailed'));
     }
@@ -238,44 +242,12 @@ export default function ConfigScreen() {
     }
 
     if (hasDownloadedUpdate) {
-      Alert.alert(
-        t('settings.updatePromptTitle'),
-        `${t('settings.latestVersion')}: v${latestManifest.version}`,
-        [
-          {
-            text: t('settings.updatePromptLater'),
-            style: 'cancel',
-          },
-          {
-            text: t('settings.installUpdate'),
-            onPress: () => {
-              void handleInstallAppUpdate();
-            },
-          },
-        ]
-      );
+      setUpdateDialogMode('install');
       return;
     }
 
-    Alert.alert(
-      t('settings.updatePromptTitle'),
-      [`${t('settings.latestVersion')}: v${latestManifest.version}`, '', latestManifest.notes]
-        .filter(Boolean)
-        .join('\n'),
-      [
-        {
-          text: t('settings.updatePromptLater'),
-          style: 'cancel',
-        },
-        {
-          text: t('settings.updatePromptDownload'),
-          onPress: () => {
-            void handleDownloadAppUpdate();
-          },
-        },
-      ]
-    );
-  }, [handleDownloadAppUpdate, handleInstallAppUpdate, hasDownloadedUpdate, latestManifest, t]);
+    setUpdateDialogMode('download');
+  }, [hasDownloadedUpdate, latestManifest]);
 
   const handleCheckAppUpdate = React.useCallback(async () => {
     if (updateStatus === 'downloading') {
@@ -308,24 +280,7 @@ export default function ConfigScreen() {
       return;
     }
 
-    Alert.alert(
-      t('settings.updatePromptTitle'),
-      [`${t('settings.latestVersion')}: v${result.manifest.version}`, '', result.manifest.notes]
-        .filter(Boolean)
-        .join('\n'),
-      [
-        {
-          text: t('settings.updatePromptLater'),
-          style: 'cancel',
-        },
-        {
-          text: t('settings.updatePromptDownload'),
-          onPress: () => {
-            void handleDownloadAppUpdate();
-          },
-        },
-      ]
-    );
+    setUpdateDialogMode('download');
   }, [
     checkForUpdates,
     downloadProgress,
@@ -336,6 +291,20 @@ export default function ConfigScreen() {
     t,
     updateStatus,
   ]);
+
+  const updateDialogDescription = React.useMemo(() => {
+    if (!latestManifest) {
+      return '';
+    }
+
+    if (updateDialogMode === 'install') {
+      return `${t('settings.latestVersion')}: v${latestManifest.version}\n\n${t('settings.updateReadyToInstall')}`;
+    }
+
+    return [`${t('settings.latestVersion')}: v${latestManifest.version}`, '', latestManifest.notes]
+      .filter(Boolean)
+      .join('\n');
+  }, [latestManifest, t, updateDialogMode]);
 
   return (
     <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
@@ -540,6 +509,35 @@ export default function ConfigScreen() {
           </View>
         </NativeOnlyAnimatedView>
       </ScrollView>
+
+      <AlertDialog
+        open={updateDialogMode !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setUpdateDialogMode(null);
+          }
+        }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('settings.updatePromptTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{updateDialogDescription}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onPress={() => setUpdateDialogMode(null)}>
+              <Text>{t('settings.updatePromptLater')}</Text>
+            </AlertDialogCancel>
+            {updateDialogMode === 'install' ? (
+              <AlertDialogAction onPress={handleInstallAppUpdate}>
+                <Text>{t('settings.installUpdate')}</Text>
+              </AlertDialogAction>
+            ) : (
+              <AlertDialogAction onPress={handleDownloadAppUpdate}>
+                <Text>{t('settings.updatePromptDownload')}</Text>
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ScreenTransitionView>
   );
 }
