@@ -3,26 +3,7 @@
 # dependencies
 node_modules/
 
-android/*
-!android/app/
-android/app/*
-!android/app/build.gradle
-!android/app/src/
-android/app/src/*
-!android/app/src/main/
-android/app/src/main/*
-!android/app/src/main/AndroidManifest.xml
-!android/app/src/main/java/
-android/app/src/main/java/*
-!android/app/src/main/java/com/
-android/app/src/main/java/com/*
-!android/app/src/main/java/com/richardbez/
-android/app/src/main/java/com/richardbez/*
-!android/app/src/main/java/com/richardbez/s3man/
-android/app/src/main/java/com/richardbez/s3man/*
-!android/app/src/main/java/com/richardbez/s3man/MainApplication.kt
-!android/app/src/main/java/com/richardbez/s3man/AppUpdateModule.kt
-!android/app/src/main/java/com/richardbez/s3man/AppUpdatePackage.kt
+android/
 ios/
 # Expo
 .expo/
@@ -61,3 +42,4 @@ worker/wrangler.toml
 
 expo-env.d.ts
 # @end expo-cli
+scripts/upload-github-release.mjs

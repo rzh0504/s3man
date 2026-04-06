@@ -28,8 +28,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.richardbez.s3man",
-      "versionCode": 2
+      "package": "com.richardbez.s3man"
     },
     "web": {
       "bundler": "metro",
@@ -72,7 +71,6 @@
     },
     "extra": {
       "router": {},
-      "appUpdateManifestUrl": "https://github.com/rzh0504/s3man/releases/latest/download/update.json",
       "eas": {
         "projectId": "c74879b3-2d7d-4ece-a094-9b37488c506d"
       }

@@ -14,10 +14,8 @@ import { useBucketStore } from '@/lib/stores/bucket-store';
 import { useObjectStore } from '@/lib/stores/object-store';
 import { useSettingsStore } from '@/lib/stores/settings-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
-import { useAppUpdateStore } from '@/lib/updates/store';
 import { useEffect } from 'react';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
-import { Platform } from 'react-native';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -31,7 +29,6 @@ export default function RootLayout() {
   const prewarmRecentObjects = useObjectStore((s) => s.prewarmRecentObjects);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const loadTransfers = useTransferStore((s) => s.loadTasks);
-  const checkForUpdates = useAppUpdateStore((s) => s.checkForUpdates);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -42,20 +39,10 @@ export default function RootLayout() {
         .connections.filter((connection) => connection.status === 'connected')
         .map((connection) => connection.id);
       void prewarmRecentObjects(connectionIds);
-      if (Platform.OS === 'android') {
-        void checkForUpdates({ mode: 'auto' });
-      }
     };
 
     void bootstrap();
-  }, [
-    checkForUpdates,
-    loadConnections,
-    loadCachedBuckets,
-    loadSettings,
-    loadTransfers,
-    prewarmRecentObjects,
-  ]);
+  }, [loadConnections, loadCachedBuckets, loadSettings, loadTransfers, prewarmRecentObjects]);
 
   return (
     <KeyboardProvider>

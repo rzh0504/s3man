@@ -1,13 +1,3 @@
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { fadeIn } from '@/components/ui/fade-motion';
 import { Icon } from '@/components/ui/icon';
@@ -19,13 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { useConnectionStore } from '@/lib/stores/connection-store';
 import { useSettingsStore } from '@/lib/stores/settings-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
-import {
-  formatDownloadDirectoryLabel,
-  getDownloadDirectoryNameFromUri,
-} from '@/lib/download-directory';
+import { formatDownloadDirectoryLabel, getDownloadDirectoryNameFromUri } from '@/lib/download-directory';
 import { useT } from '@/lib/i18n';
 import type { TranslationKey } from '@/lib/i18n';
-import { useAppUpdateStore } from '@/lib/updates/store';
 import {
   ChevronRightIcon,
   SettingsIcon,
@@ -35,13 +21,11 @@ import {
   LanguagesIcon,
   FolderOpenIcon,
   RotateCcwIcon,
-  DownloadIcon,
-  RefreshCwIcon,
 } from 'lucide-react-native';
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as React from 'react';
-import { View, ScrollView, Pressable, Alert, Platform, ToastAndroid } from 'react-native';
+import { View, ScrollView, Pressable, Alert, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
@@ -59,8 +43,6 @@ const TRANSFER_HISTORY_LABELS: Record<(typeof TRANSFER_HISTORY_OPTIONS)[number],
   3: 'settings.transferHistory3d',
   7: 'settings.transferHistory7d',
 };
-
-type UpdateDialogMode = 'download' | 'install' | null;
 
 export default function ConfigScreen() {
   const insets = useSafeAreaInsets();
@@ -80,24 +62,8 @@ export default function ConfigScreen() {
     downloadDirectoryName,
     setDownloadDirectory,
   } = useSettingsStore();
-  const currentVersion = useAppUpdateStore((s) => s.currentVersion);
-  const updateStatus = useAppUpdateStore((s) => s.status);
-  const latestManifest = useAppUpdateStore((s) => s.latestManifest);
-  const downloadProgress = useAppUpdateStore((s) => s.progress);
-  const downloadedVersionCode = useAppUpdateStore((s) => s.downloadedVersionCode);
-  const checkForUpdates = useAppUpdateStore((s) => s.checkForUpdates);
-  const downloadAvailableUpdate = useAppUpdateStore((s) => s.downloadAvailableUpdate);
-  const installAvailableUpdate = useAppUpdateStore((s) => s.installAvailableUpdate);
-  const [updateDialogMode, setUpdateDialogMode] = React.useState<UpdateDialogMode>(null);
 
   const connectedCount = connections.filter((c) => c.status === 'connected').length;
-  const canUseInAppUpdates = Platform.OS === 'android';
-  const hasPendingUpdate =
-    canUseInAppUpdates &&
-    !!latestManifest &&
-    latestManifest.versionCode > currentVersion.versionCode;
-  const hasDownloadedUpdate =
-    hasPendingUpdate && downloadedVersionCode === latestManifest?.versionCode;
 
   const themeScale = useSharedValue(1);
 
@@ -154,32 +120,6 @@ export default function ConfigScreen() {
     return rawLabel;
   }, [downloadDirectoryName, downloadDirectoryUri, t]);
 
-  const showSystemToast = React.useCallback((message: string) => {
-    if (Platform.OS === 'android') {
-      ToastAndroid.show(message, ToastAndroid.SHORT);
-      return;
-    }
-
-    Alert.alert('', message);
-  }, []);
-
-  const appUpdateSummary = React.useMemo(() => {
-    switch (updateStatus) {
-      case 'checking':
-        return t('settings.checkingUpdates');
-      case 'downloading':
-        return t('settings.updateDownloadingProgress', {
-          progress: Math.round(downloadProgress ?? 0),
-        });
-      case 'downloaded':
-        return t('settings.installUpdate');
-      case 'updateAvailable':
-        return t('settings.updateAvailable');
-      default:
-        return currentVersion.displayVersion;
-    }
-  }, [currentVersion.displayVersion, downloadProgress, t, updateStatus]);
-
   const handlePickDownloadDirectory = React.useCallback(async () => {
     if (Platform.OS !== 'android') {
       Alert.alert(t('settings.downloadDirectory'), t('settings.downloadDirectoryOtherDesc'));
@@ -211,103 +151,9 @@ export default function ConfigScreen() {
     setDownloadDirectory(null);
   }, [setDownloadDirectory]);
 
-  const handleInstallAppUpdate = React.useCallback(async () => {
-    try {
-      setUpdateDialogMode(null);
-      await installAvailableUpdate();
-    } catch (error) {
-      const message =
-        error instanceof Error && error.message === 'Install permission not granted'
-          ? t('settings.updatePermissionDenied')
-          : error instanceof Error
-            ? error.message
-            : t('settings.updateInstallFailed');
-      showSystemToast(message);
-    }
-  }, [installAvailableUpdate, showSystemToast, t]);
-
-  const handleDownloadAppUpdate = React.useCallback(async () => {
-    try {
-      setUpdateDialogMode(null);
-      await downloadAvailableUpdate();
-      setUpdateDialogMode('install');
-    } catch (error) {
-      showSystemToast(error instanceof Error ? error.message : t('settings.updateDownloadFailed'));
-    }
-  }, [downloadAvailableUpdate, handleInstallAppUpdate, showSystemToast, t]);
-
-  const openUpdateDialog = React.useCallback(() => {
-    if (!latestManifest) {
-      return;
-    }
-
-    if (hasDownloadedUpdate) {
-      setUpdateDialogMode('install');
-      return;
-    }
-
-    setUpdateDialogMode('download');
-  }, [hasDownloadedUpdate, latestManifest]);
-
-  const handleCheckAppUpdate = React.useCallback(async () => {
-    if (updateStatus === 'downloading') {
-      showSystemToast(
-        t('settings.updateDownloadingProgress', {
-          progress: Math.round(downloadProgress ?? 0),
-        })
-      );
-      return;
-    }
-
-    if (hasPendingUpdate) {
-      openUpdateDialog();
-      return;
-    }
-
-    const result = await checkForUpdates({ mode: 'manual', force: true });
-
-    if (!result) {
-      return;
-    }
-
-    if (result.status === 'upToDate') {
-      showSystemToast(t('settings.noUpdateAvailable'));
-      return;
-    }
-
-    if (result.status === 'error') {
-      showSystemToast(result.message);
-      return;
-    }
-
-    setUpdateDialogMode('download');
-  }, [
-    checkForUpdates,
-    downloadProgress,
-    handleDownloadAppUpdate,
-    hasPendingUpdate,
-    openUpdateDialog,
-    showSystemToast,
-    t,
-    updateStatus,
-  ]);
-
-  const updateDialogDescription = React.useMemo(() => {
-    if (!latestManifest) {
-      return '';
-    }
-
-    if (updateDialogMode === 'install') {
-      return `${t('settings.latestVersion')}: v${latestManifest.version}\n\n${t('settings.updateReadyToInstall')}`;
-    }
-
-    return [`${t('settings.latestVersion')}: v${latestManifest.version}`, '', latestManifest.notes]
-      .filter(Boolean)
-      .join('\n');
-  }, [latestManifest, t, updateDialogMode]);
-
   return (
     <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
+      {/* Header */}
       <View className="px-6 pt-4 pb-3">
         <View className="flex-row items-center justify-between gap-3">
           <View className="flex-row items-center gap-2.5">
@@ -321,6 +167,7 @@ export default function ConfigScreen() {
       <Separator />
 
       <ScrollView className="flex-1" contentContainerClassName="px-6 pb-12 pt-3">
+        {/* ── Connections ─────────────────────────────────────────────── */}
         <NativeOnlyAnimatedView entering={fadeIn()}>
           <View className="border-border bg-card rounded-xl border">
             <Pressable
@@ -344,6 +191,7 @@ export default function ConfigScreen() {
           </View>
         </NativeOnlyAnimatedView>
 
+        {/* ── General ─────────────────────────────────────────────────── */}
         <Separator className="my-6" />
 
         <View className="mb-4">
@@ -352,11 +200,10 @@ export default function ConfigScreen() {
 
         <NativeOnlyAnimatedView entering={fadeIn(40)}>
           <View className="border-border bg-card rounded-xl border">
+            {/* Theme */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">
               <View className="flex-1">
-                <Text className="text-foreground text-sm font-medium">
-                  {t('settings.darkMode')}
-                </Text>
+                <Text className="text-foreground text-sm font-medium">{t('settings.darkMode')}</Text>
               </View>
               <Pressable
                 onPress={toggleTheme}
@@ -374,6 +221,7 @@ export default function ConfigScreen() {
 
             <Separator />
 
+            {/* Thumbnails */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">
               <Pressable
                 onPress={() => setShowThumbnails(!showThumbnails)}
@@ -390,6 +238,7 @@ export default function ConfigScreen() {
 
             <Separator />
 
+            {/* Transfer History */}
             <View className="flex-row items-center justify-between gap-3 px-4 py-3.5">
               <Text className="text-foreground flex-1 text-sm font-medium">
                 {t('settings.transferHistoryDays')}
@@ -403,7 +252,7 @@ export default function ConfigScreen() {
                       onPress={() => handleTransferHistoryDaysChange(option)}
                       className={`min-w-12 items-center justify-center rounded-md px-2.5 py-1.5 ${
                         isActive
-                          ? 'bg-background dark:border-foreground/10 dark:bg-input/30 border border-transparent shadow-sm shadow-black/5'
+                          ? 'bg-background border border-transparent shadow-sm shadow-black/5 dark:border-foreground/10 dark:bg-input/30'
                           : ''
                       }`}>
                       <Text
@@ -420,6 +269,7 @@ export default function ConfigScreen() {
 
             <Separator />
 
+            {/* Download Directory */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">
               <View className="flex-1">
                 <Text className="text-foreground text-sm font-medium">
@@ -453,45 +303,12 @@ export default function ConfigScreen() {
               ) : null}
             </View>
 
-            {canUseInAppUpdates ? (
-              <>
-                <Separator />
-
-                <View className="flex-row items-center gap-3 px-4 py-3.5">
-                  <View className="flex-1">
-                    <Text className="text-foreground text-sm font-medium">
-                      {t('settings.appUpdates')}
-                    </Text>
-                  </View>
-                  <Text
-                    numberOfLines={1}
-                    className="text-muted-foreground max-w-52 flex-1 text-right text-sm">
-                    {appUpdateSummary}
-                  </Text>
-                  <Pressable
-                    onPress={() => {
-                      void handleCheckAppUpdate();
-                    }}
-                    className="active:bg-accent -my-2 rounded-full p-2"
-                    accessibilityRole="button"
-                    accessibilityLabel={t('settings.appUpdates')}
-                    disabled={updateStatus === 'checking'}>
-                    <Icon
-                      as={hasPendingUpdate ? DownloadIcon : RefreshCwIcon}
-                      className="text-muted-foreground size-5"
-                    />
-                  </Pressable>
-                </View>
-              </>
-            ) : null}
-
             <Separator />
 
+            {/* Language */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">
               <View className="flex-1">
-                <Text className="text-foreground text-sm font-medium">
-                  {t('settings.language')}
-                </Text>
+                <Text className="text-foreground text-sm font-medium">{t('settings.language')}</Text>
               </View>
               <View className="flex-row items-center gap-2">
                 <Text className="text-muted-foreground text-sm">
@@ -509,35 +326,6 @@ export default function ConfigScreen() {
           </View>
         </NativeOnlyAnimatedView>
       </ScrollView>
-
-      <AlertDialog
-        open={updateDialogMode !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setUpdateDialogMode(null);
-          }
-        }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.updatePromptTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>{updateDialogDescription}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onPress={() => setUpdateDialogMode(null)}>
-              <Text>{t('settings.updatePromptLater')}</Text>
-            </AlertDialogCancel>
-            {updateDialogMode === 'install' ? (
-              <AlertDialogAction onPress={handleInstallAppUpdate}>
-                <Text>{t('settings.installUpdate')}</Text>
-              </AlertDialogAction>
-            ) : (
-              <AlertDialogAction onPress={handleDownloadAppUpdate}>
-                <Text>{t('settings.updatePromptDownload')}</Text>
-              </AlertDialogAction>
-            )}
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </ScreenTransitionView>
   );
 }
