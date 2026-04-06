@@ -33,12 +33,19 @@ interface SettingsState {
   transferHistoryDays: TransferHistoryDays;
   downloadDirectoryUri: string | null;
   downloadDirectoryName: string | null;
+  lastAppUpdateCheckAt: number | null;
+  ignoredAppUpdateVersionCode: number | null;
+  downloadedAppUpdateVersionCode: number | null;
+  downloadedAppUpdateFileUri: string | null;
   isLoaded: boolean;
   loadSettings: () => Promise<void>;
   setShowThumbnails: (value: boolean) => void;
   setLanguage: (value: Locale) => void;
   setTransferHistoryDays: (value: TransferHistoryDays) => void;
   setDownloadDirectory: (value: { uri: string; name: string } | null) => void;
+  setLastAppUpdateCheckAt: (value: number | null) => void;
+  setIgnoredAppUpdateVersionCode: (value: number | null) => void;
+  setDownloadedAppUpdate: (value: { versionCode: number; fileUri: string } | null) => void;
 }
 
 function buildPersistedSettings({
@@ -47,12 +54,20 @@ function buildPersistedSettings({
   transferHistoryDays,
   downloadDirectoryUri,
   downloadDirectoryName,
+  lastAppUpdateCheckAt,
+  ignoredAppUpdateVersionCode,
+  downloadedAppUpdateVersionCode,
+  downloadedAppUpdateFileUri,
 }: {
   showThumbnails: boolean;
   language: Locale;
   transferHistoryDays: TransferHistoryDays;
   downloadDirectoryUri: string | null;
   downloadDirectoryName: string | null;
+  lastAppUpdateCheckAt: number | null;
+  ignoredAppUpdateVersionCode: number | null;
+  downloadedAppUpdateVersionCode: number | null;
+  downloadedAppUpdateFileUri: string | null;
 }) {
   return {
     showThumbnails,
@@ -60,6 +75,10 @@ function buildPersistedSettings({
     transferHistoryDays,
     downloadDirectoryUri,
     downloadDirectoryName,
+    lastAppUpdateCheckAt,
+    ignoredAppUpdateVersionCode,
+    downloadedAppUpdateVersionCode,
+    downloadedAppUpdateFileUri,
   };
 }
 
@@ -69,6 +88,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   transferHistoryDays: 1,
   downloadDirectoryUri: null,
   downloadDirectoryName: null,
+  lastAppUpdateCheckAt: null,
+  ignoredAppUpdateVersionCode: null,
+  downloadedAppUpdateVersionCode: null,
+  downloadedAppUpdateFileUri: null,
   isLoaded: false,
 
   loadSettings: async () => {
@@ -76,7 +99,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (data) {
       const lang = (data.language as Locale) || 'zh';
       const transferHistoryDays =
-        data.transferHistoryDays === 3 || data.transferHistoryDays === 7 ? data.transferHistoryDays : 1;
+        data.transferHistoryDays === 3 || data.transferHistoryDays === 7
+          ? data.transferHistoryDays
+          : 1;
       set({
         showThumbnails: !!data.showThumbnails,
         language: lang,
@@ -85,6 +110,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           typeof data.downloadDirectoryUri === 'string' ? data.downloadDirectoryUri : null,
         downloadDirectoryName:
           typeof data.downloadDirectoryName === 'string' ? data.downloadDirectoryName : null,
+        lastAppUpdateCheckAt:
+          typeof data.lastAppUpdateCheckAt === 'number' ? data.lastAppUpdateCheckAt : null,
+        ignoredAppUpdateVersionCode:
+          typeof data.ignoredAppUpdateVersionCode === 'number'
+            ? data.ignoredAppUpdateVersionCode
+            : null,
+        downloadedAppUpdateVersionCode:
+          typeof data.downloadedAppUpdateVersionCode === 'number'
+            ? data.downloadedAppUpdateVersionCode
+            : null,
+        downloadedAppUpdateFileUri:
+          typeof data.downloadedAppUpdateFileUri === 'string'
+            ? data.downloadedAppUpdateFileUri
+            : null,
         isLoaded: true,
       });
       useI18nStore.getState().setLocale(lang);
@@ -102,6 +141,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         transferHistoryDays: get().transferHistoryDays,
         downloadDirectoryUri: get().downloadDirectoryUri,
         downloadDirectoryName: get().downloadDirectoryName,
+        lastAppUpdateCheckAt: get().lastAppUpdateCheckAt,
+        ignoredAppUpdateVersionCode: get().ignoredAppUpdateVersionCode,
+        downloadedAppUpdateVersionCode: get().downloadedAppUpdateVersionCode,
+        downloadedAppUpdateFileUri: get().downloadedAppUpdateFileUri,
       })
     );
   },
@@ -116,6 +159,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         transferHistoryDays: get().transferHistoryDays,
         downloadDirectoryUri: get().downloadDirectoryUri,
         downloadDirectoryName: get().downloadDirectoryName,
+        lastAppUpdateCheckAt: get().lastAppUpdateCheckAt,
+        ignoredAppUpdateVersionCode: get().ignoredAppUpdateVersionCode,
+        downloadedAppUpdateVersionCode: get().downloadedAppUpdateVersionCode,
+        downloadedAppUpdateFileUri: get().downloadedAppUpdateFileUri,
       })
     );
   },
@@ -129,6 +176,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         transferHistoryDays: value,
         downloadDirectoryUri: get().downloadDirectoryUri,
         downloadDirectoryName: get().downloadDirectoryName,
+        lastAppUpdateCheckAt: get().lastAppUpdateCheckAt,
+        ignoredAppUpdateVersionCode: get().ignoredAppUpdateVersionCode,
+        downloadedAppUpdateVersionCode: get().downloadedAppUpdateVersionCode,
+        downloadedAppUpdateFileUri: get().downloadedAppUpdateFileUri,
       })
     );
   },
@@ -145,6 +196,64 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         transferHistoryDays: get().transferHistoryDays,
         downloadDirectoryUri: value?.uri ?? null,
         downloadDirectoryName: value?.name ?? null,
+        lastAppUpdateCheckAt: get().lastAppUpdateCheckAt,
+        ignoredAppUpdateVersionCode: get().ignoredAppUpdateVersionCode,
+        downloadedAppUpdateVersionCode: get().downloadedAppUpdateVersionCode,
+        downloadedAppUpdateFileUri: get().downloadedAppUpdateFileUri,
+      })
+    );
+  },
+
+  setLastAppUpdateCheckAt: (value) => {
+    set({ lastAppUpdateCheckAt: value });
+    saveToStorage(
+      buildPersistedSettings({
+        showThumbnails: get().showThumbnails,
+        language: get().language,
+        transferHistoryDays: get().transferHistoryDays,
+        downloadDirectoryUri: get().downloadDirectoryUri,
+        downloadDirectoryName: get().downloadDirectoryName,
+        lastAppUpdateCheckAt: value,
+        ignoredAppUpdateVersionCode: get().ignoredAppUpdateVersionCode,
+        downloadedAppUpdateVersionCode: get().downloadedAppUpdateVersionCode,
+        downloadedAppUpdateFileUri: get().downloadedAppUpdateFileUri,
+      })
+    );
+  },
+
+  setIgnoredAppUpdateVersionCode: (value) => {
+    set({ ignoredAppUpdateVersionCode: value });
+    saveToStorage(
+      buildPersistedSettings({
+        showThumbnails: get().showThumbnails,
+        language: get().language,
+        transferHistoryDays: get().transferHistoryDays,
+        downloadDirectoryUri: get().downloadDirectoryUri,
+        downloadDirectoryName: get().downloadDirectoryName,
+        lastAppUpdateCheckAt: get().lastAppUpdateCheckAt,
+        ignoredAppUpdateVersionCode: value,
+        downloadedAppUpdateVersionCode: get().downloadedAppUpdateVersionCode,
+        downloadedAppUpdateFileUri: get().downloadedAppUpdateFileUri,
+      })
+    );
+  },
+
+  setDownloadedAppUpdate: (value) => {
+    set({
+      downloadedAppUpdateVersionCode: value?.versionCode ?? null,
+      downloadedAppUpdateFileUri: value?.fileUri ?? null,
+    });
+    saveToStorage(
+      buildPersistedSettings({
+        showThumbnails: get().showThumbnails,
+        language: get().language,
+        transferHistoryDays: get().transferHistoryDays,
+        downloadDirectoryUri: get().downloadDirectoryUri,
+        downloadDirectoryName: get().downloadDirectoryName,
+        lastAppUpdateCheckAt: get().lastAppUpdateCheckAt,
+        ignoredAppUpdateVersionCode: get().ignoredAppUpdateVersionCode,
+        downloadedAppUpdateVersionCode: value?.versionCode ?? null,
+        downloadedAppUpdateFileUri: value?.fileUri ?? null,
       })
     );
   },

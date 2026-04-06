@@ -69,6 +69,34 @@ export default {
     'Custom folders are only supported on Android. Other platforms save into app storage.',
   'settings.chooseDownloadDirectory': 'Choose Folder',
   'settings.resetDownloadDirectory': 'Use Default',
+  'settings.appUpdates': 'App Updates',
+  'settings.appUpdatesDesc': 'Check, download, and install new APK releases from GitHub.',
+  'settings.currentVersion': 'Current version',
+  'settings.latestVersion': 'Latest version',
+  'settings.updatePublishedAt': 'Published',
+  'settings.updatePackageSize': 'Package size',
+  'settings.updateNotes': 'Release notes',
+  'settings.checkUpdates': 'Check for updates',
+  'settings.checkingUpdates': 'Checking...',
+  'settings.updateAvailable': 'New version available',
+  'settings.noUpdateAvailable': 'You are already on the latest version',
+  'settings.updateDownloading': 'Downloading...',
+  'settings.updateDownloadingProgress': 'Downloading {progress}%',
+  'settings.downloadUpdate': 'Download update',
+  'settings.updateReadyToInstall':
+    'The new version has finished downloading and is ready to install.',
+  'settings.installUpdate': 'Install now',
+  'settings.ignoreUpdate': 'Ignore this version',
+  'settings.updateLastError': 'Update failed',
+  'settings.updateCheckFailed': 'Failed to check for updates',
+  'settings.updateDownloadFailed': 'Failed to download update',
+  'settings.updateInstallFailed': 'Failed to install update',
+  'settings.updatePermissionDenied':
+    'Install permission was not granted. Allow this app to install unknown apps and try again.',
+  'settings.updatePromptTitle': 'New version available',
+  'settings.updatePromptLater': 'Later',
+  'settings.updatePromptDownload': 'Download',
+  'settings.updatePromptIgnore': 'Ignore',
 
   // ── Connections ────────────────────────────────────────────────────────
   'conn.title': 'Connection',
@@ -100,26 +128,34 @@ export default {
   'form.willUse': 'Will use: {url}',
   'form.accessKeyId': 'Access Key ID',
   'form.secretAccessKey': 'Secret Access Key',
-  'form.b2KeyIdHelp': 'Use Master Application Key ID to access all buckets. Find in B2 Cloud Storage → App Keys.',
-  'form.b2SecretHelp': 'The master application key is only shown once after creation. Please keep it safe.',
+  'form.b2KeyIdHelp':
+    'Use Master Application Key ID to access all buckets. Find in B2 Cloud Storage → App Keys.',
+  'form.b2SecretHelp':
+    'The master application key is only shown once after creation. Please keep it safe.',
   'form.b2SecretPlaceholder': 'B2 Master Application Key',
   'form.secretPlaceholder': 'Enter secret key',
   'form.region': 'Region',
   'form.customRegionPlaceholder': 'e.g. us-east-1, leave empty to use default',
-  'form.customRegionHelp': 'For custom S3 providers, enter the region your service expects. Empty falls back to default.',
+  'form.customRegionHelp':
+    'For custom S3 providers, enter the region your service expects. Empty falls back to default.',
   'form.pathStyle': 'Path Style Access',
-  'form.pathStyleHelp': 'Use path-style URLs (endpoint/bucket). Disable if your provider requires virtual-hosted style (bucket.endpoint).',
+  'form.pathStyleHelp':
+    'Use path-style URLs (endpoint/bucket). Disable if your provider requires virtual-hosted style (bucket.endpoint).',
   'form.proxyUrl': 'Proxy URL',
   'form.optional': '(optional)',
-  'form.proxyUrlHelp': 'Cloudflare Worker proxy for faster access and clean URLs. Leave empty to use pre-signed S3 URLs.',
+  'form.proxyUrlHelp':
+    'Cloudflare Worker proxy for faster access and clean URLs. Leave empty to use pre-signed S3 URLs.',
   'form.proxyToken': 'Proxy Token',
   'form.proxyTokenPlaceholder': 'Proxy bearer token',
   'form.proxyAlias': 'Proxy Alias',
-  'form.proxyAliasHelp': 'Short name for clean share links, e.g. "b2" → proxy.com/b2/bucket/file.png',
+  'form.proxyAliasHelp':
+    'Short name for clean share links, e.g. "b2" → proxy.com/b2/bucket/file.png',
   'form.discoverBuckets': 'Discover Buckets',
   'form.selectedCount': '{selected}/{total} selected',
-  'form.discoverHelpR2': 'Use Master Application Key ID to list all buckets, then select which to add.',
-  'form.discoverHelpGeneric': 'Fetch available buckets and select which to display. Select all = show all.',
+  'form.discoverHelpR2':
+    'Use Master Application Key ID to list all buckets, then select which to add.',
+  'form.discoverHelpGeneric':
+    'Fetch available buckets and select which to display. Select all = show all.',
   'form.discovering': 'Discovering...',
   'form.discoveredCount': 'Discovered {count} buckets',
   'form.selectAll': 'Select All',
@@ -132,7 +168,8 @@ export default {
   // ── Export / Import ────────────────────────────────────────────────────
   'data.title': 'Data',
   'data.desc': 'Export or import connection configs across devices.',
-  'data.warning': 'Exported files contain credentials (access keys), encrypted for safety. Keep them secure.',
+  'data.warning':
+    'Exported files contain credentials (access keys), encrypted for safety. Keep them secure.',
   'data.export': 'Export',
   'data.exportConfig': 'Export Config',
   'data.import': 'Import',
@@ -193,7 +230,8 @@ export default {
   'bucket.uploadFiles': 'Files',
   'bucket.newFolder': 'New Folder',
   'bucket.deleteFiles': 'Delete Files',
-  'bucket.deleteFilesDesc': 'Are you sure you want to delete {count} file(s)? This action cannot be undone.',
+  'bucket.deleteFilesDesc':
+    'Are you sure you want to delete {count} file(s)? This action cannot be undone.',
   'bucket.deletingFiles': 'Deleting...',
   'bucket.downloadStarted': 'Downloading {name}',
   'bucket.downloadComplete': 'Download Complete',
@@ -229,7 +267,8 @@ export default {
   'share.error': 'Error',
   'share.loadBucketsFailed': 'Failed to load buckets',
   'share.uploadFailed': 'Upload failed',
-  'share.prepareFailed': 'Could not read the shared file. Please copy it into an app-accessible location and try again.',
+  'share.prepareFailed':
+    'Could not read the shared file. Please copy it into an app-accessible location and try again.',
   'share.fileCount': '{count} file(s) to upload',
   'share.destConnection': 'Destination Connection',
   'share.noProviders': 'No connected providers. Please configure a connection first.',
