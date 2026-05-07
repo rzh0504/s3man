@@ -12,12 +12,16 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.richardbez.s3man",
       "entitlements": {
-        "com.apple.security.application-groups": ["group.com.richardbez.s3man"]
+        "com.apple.security.application-groups": [
+          "group.com.richardbez.s3man"
+        ]
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -58,12 +62,17 @@
           },
           "android": {
             "enabled": true,
-            "singleShareMimeTypes": ["*/*"],
-            "multipleShareMimeTypes": ["*/*"]
+            "singleShareMimeTypes": [
+              "*/*"
+            ],
+            "multipleShareMimeTypes": [
+              "*/*"
+            ]
           }
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
