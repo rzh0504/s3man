@@ -1,8 +1,8 @@
 import { Input } from '@/components/ui/input';
 import { NativeOnlyAnimatedView } from '@/components/ui/native-only-animated-view';
+import { Switch } from '@/components/ui/switch';
 import { Text } from '@/components/ui/text';
 import { fadeIn, fadeOut } from '@/components/ui/fade-motion';
-import { InfoTooltip } from '@/components/info-tooltip';
 import { cn } from '@/lib/utils';
 import { formatBytes } from '@/lib/constants';
 import { useT } from '@/lib/i18n';
@@ -26,8 +26,10 @@ export interface UploadDraftFile extends UploadFileLike {
 interface UploadOptionsEditorProps {
   files: UploadDraftFile[];
   imageCompression: UploadImageCompression;
+  convertToWebp: boolean;
   onFileNameChange: (id: string, name: string) => void;
   onImageCompressionChange: (value: UploadImageCompression) => void;
+  onConvertToWebpChange: (value: boolean) => void;
   validationError?: string | null;
 }
 
@@ -50,6 +52,22 @@ const REAL_PREVIEW_COMPRESSION_LEVELS: Exclude<UploadImageCompression, 'original
   'medium',
   'low',
 ];
+
+const REAL_PREVIEW_WEBP_LEVELS: UploadImageCompression[] = ['original', 'high', 'medium', 'low'];
+
+function getDraftBaseName(fileName: string, extensionSuffix: string): string {
+  if (extensionSuffix && fileName.toLowerCase().endsWith(extensionSuffix.toLowerCase())) {
+    return fileName.slice(0, -extensionSuffix.length);
+  }
+
+  return getUploadFileNameParts(fileName).baseName;
+}
+
+function isDraftBaseNameMissing(file: UploadDraftFile): boolean {
+  const originalParts = getUploadFileNameParts(file.originalName);
+  const extensionSuffix = originalParts.extension ? `.${originalParts.extension}` : '';
+  return getDraftBaseName(file.name, extensionSuffix).trim().length === 0;
+}
 
 const TAB_TIMING_CONFIG = { duration: 180, easing: Easing.out(Easing.quad) };
 const TAB_CONTAINER_PADDING = 3;
@@ -137,24 +155,35 @@ const UploadFileNameField = React.memo(function UploadFileNameField({
   file,
   onFileNameChange,
   imageCompression,
+  convertToWebp,
 }: {
   file: UploadDraftFile;
   onFileNameChange: (id: string, name: string) => void;
   imageCompression: UploadImageCompression;
+  convertToWebp: boolean;
 }) {
   const t = useT();
-  const initialParts = React.useMemo(() => getUploadFileNameParts(file.name), [file.name]);
-  const [draftBaseName, setDraftBaseName] = React.useState(initialParts.baseName);
+  const originalParts = React.useMemo(() => getUploadFileNameParts(file.originalName), [file.originalName]);
+  const sourceExtensionSuffix = originalParts.extension ? `.${originalParts.extension}` : '';
+  const initialBaseName = React.useMemo(
+    () => getDraftBaseName(file.name, sourceExtensionSuffix),
+    [file.name, sourceExtensionSuffix]
+  );
+  const [draftBaseName, setDraftBaseName] = React.useState(initialBaseName);
 
   React.useEffect(() => {
-    setDraftBaseName(initialParts.baseName);
-  }, [file.id, initialParts.baseName]);
+    setDraftBaseName(initialBaseName);
+  }, [file.id, initialBaseName]);
 
-  const extensionSuffix = initialParts.extension ? `.${initialParts.extension}` : '';
-  const isCompressible = isCompressibleImageFile(file);
+  const compressionFile = React.useMemo(
+    () => ({ uri: file.uri, name: file.originalName, size: file.size, mimeType: file.mimeType }),
+    [file.mimeType, file.originalName, file.size, file.uri]
+  );
+  const isCompressible = isCompressibleImageFile(compressionFile);
+  const displayExtensionSuffix = convertToWebp && isCompressible ? '.webp' : sourceExtensionSuffix;
   const estimatedSize = React.useMemo(
-    () => estimateCompressedFileSize(file, imageCompression),
-    [file, imageCompression]
+    () => estimateCompressedFileSize(compressionFile, imageCompression, convertToWebp),
+    [compressionFile, imageCompression, convertToWebp]
   );
   const [previewSizes, setPreviewSizes] = React.useState<
     Partial<Record<UploadImageCompression, number | undefined>>
@@ -163,22 +192,26 @@ const UploadFileNameField = React.memo(function UploadFileNameField({
   });
 
   React.useEffect(() => {
-    setPreviewSizes({ original: file.size });
-  }, [file.id, file.size]);
+    setPreviewSizes(convertToWebp ? {} : { original: file.size });
+  }, [convertToWebp, file.id, file.size]);
 
   React.useEffect(() => {
     let cancelled = false;
 
-    if (!isCompressible) {
+    if (!isCompressible || (imageCompression === 'original' && !convertToWebp)) {
       return () => {
         cancelled = true;
       };
     }
 
-    REAL_PREVIEW_COMPRESSION_LEVELS.forEach((compression) => {
+    const previewCompressionLevels = convertToWebp
+      ? REAL_PREVIEW_WEBP_LEVELS
+      : REAL_PREVIEW_COMPRESSION_LEVELS;
+
+    previewCompressionLevels.forEach((compression) => {
       if (previewSizes[compression] !== undefined) return;
 
-      void getRealCompressedFileSizePreview(file, compression).then((size) => {
+      void getRealCompressedFileSizePreview(compressionFile, compression, convertToWebp).then((size) => {
         if (!cancelled) {
           setPreviewSizes((prev) => {
             if (prev[compression] !== undefined) return prev;
@@ -191,10 +224,10 @@ const UploadFileNameField = React.memo(function UploadFileNameField({
     return () => {
       cancelled = true;
     };
-  }, [file, isCompressible, previewSizes]);
+  }, [compressionFile, convertToWebp, imageCompression, isCompressible, previewSizes]);
 
   const displaySize =
-    imageCompression === 'original'
+    imageCompression === 'original' && !convertToWebp
       ? file.size
       : previewSizes[imageCompression] ?? estimatedSize;
 
@@ -204,6 +237,7 @@ const UploadFileNameField = React.memo(function UploadFileNameField({
       : imageCompression !== 'original' && isCompressible
         ? `${formatBytes(displaySize)}`
         : formatBytes(displaySize);
+  const isBaseNameMissing = draftBaseName.trim().length === 0;
 
   return (
     <View className="gap-2">
@@ -212,7 +246,7 @@ const UploadFileNameField = React.memo(function UploadFileNameField({
         {sizeLabel ? (
           <View className="min-w-20 items-end">
             <NativeOnlyAnimatedView
-              key={`${imageCompression}:${sizeLabel}`}
+              key={`${convertToWebp ? 'webp' : 'source'}:${imageCompression}:${sizeLabel}`}
               entering={fadeIn(20)}
               exiting={fadeOut()}>
               <Text className="text-muted-foreground text-xs">{sizeLabel}</Text>
@@ -225,16 +259,16 @@ const UploadFileNameField = React.memo(function UploadFileNameField({
           value={draftBaseName}
           onChangeText={(text) => {
             setDraftBaseName(text);
-            onFileNameChange(file.id, `${text}${extensionSuffix}`);
+            onFileNameChange(file.id, `${text}${sourceExtensionSuffix}`);
           }}
           autoCapitalize="none"
           autoCorrect={false}
-          placeholder={getUploadFileNameParts(file.originalName).baseName}
-          className="flex-1"
+          placeholder={originalParts.baseName}
+          className={cn('flex-1', isBaseNameMissing && 'border-red-500')}
         />
-        {extensionSuffix ? (
+        {displayExtensionSuffix ? (
           <View className="border-input bg-muted/40 min-w-16 items-center rounded-md border px-3 py-2">
-            <Text className="text-foreground text-sm font-medium">{extensionSuffix}</Text>
+            <Text className="text-foreground text-sm font-medium">{displayExtensionSuffix}</Text>
           </View>
         ) : null}
       </View>
@@ -245,26 +279,30 @@ const UploadFileNameField = React.memo(function UploadFileNameField({
 export function UploadOptionsEditor({
   files,
   imageCompression,
+  convertToWebp,
   onFileNameChange,
   onImageCompressionChange,
+  onConvertToWebpChange,
   validationError,
 }: UploadOptionsEditorProps) {
   const t = useT();
 
   const compressibleImageCount = React.useMemo(
-    () => files.filter((file) => isCompressibleImageFile(file)).length,
+    () => files.filter((file) => isCompressibleImageFile({ ...file, name: file.originalName })).length,
     [files]
   );
+  const hasMissingBaseName = React.useMemo(() => files.some(isDraftBaseNameMissing), [files]);
 
   return (
     <View className="gap-4">
       {compressibleImageCount > 0 && (
         <View className="gap-2">
-          <View className="flex-row items-center gap-2">
+          <View className="flex-row items-center justify-between gap-3">
             <Text className="text-foreground font-medium">{t('uploadConfig.imageCompression')}</Text>
-            <InfoTooltip
-              text={t('uploadConfig.imageCompressionDesc', { count: compressibleImageCount })}
-            />
+            <View className="flex-row items-center gap-2">
+              <Text className="text-muted-foreground text-sm">{t('uploadConfig.convertToWebp')}</Text>
+              <Switch checked={convertToWebp} onCheckedChange={onConvertToWebpChange} />
+            </View>
           </View>
           <AnimatedCompressionTabs value={imageCompression} onChange={onImageCompressionChange} />
         </View>
@@ -276,12 +314,13 @@ export function UploadOptionsEditor({
             key={file.id}
             file={file}
             imageCompression={imageCompression}
+            convertToWebp={convertToWebp}
             onFileNameChange={onFileNameChange}
           />
         ))}
       </View>
 
-      {validationError ? (
+      {validationError && !hasMissingBaseName ? (
         <View className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
           <Text className="text-sm text-red-600">{validationError}</Text>
         </View>

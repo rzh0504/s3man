@@ -14,6 +14,7 @@ export interface UploadFileLike {
 export interface PrepareUploadFileOptions {
   fileName: string;
   imageCompression: UploadImageCompression;
+  convertToWebp?: boolean;
 }
 
 export const IMAGE_COMPRESSION_FAILED_ERROR = 'upload:image-compression-failed';
@@ -26,16 +27,15 @@ export type UploadFileNameValidationError =
   | 'extension_missing'
   | 'duplicate';
 
-const IMAGE_COMPRESSION_QUALITY: Record<Exclude<UploadImageCompression, 'original'>, number> = {
+const IMAGE_COMPRESSION_QUALITY: Record<UploadImageCompression, number> = {
+  original: 1,
   high: 0.85,
   medium: 0.7,
   low: 0.5,
 };
 
-const IMAGE_SIZE_ESTIMATE_RATIO: Record<
-  Exclude<UploadImageCompression, 'original'>,
-  { jpeg: number; png: number; webp: number }
-> = {
+const IMAGE_SIZE_ESTIMATE_RATIO: Record<UploadImageCompression, { jpeg: number; png: number; webp: number }> = {
+  original: { jpeg: 1, png: 1, webp: 0.92 },
   high: { jpeg: 0.84, png: 0.96, webp: 0.82 },
   medium: { jpeg: 0.7, png: 0.9, webp: 0.66 },
   low: { jpeg: 0.56, png: 0.82, webp: 0.52 },
@@ -203,27 +203,34 @@ export function isCompressibleImageFile(file: Pick<UploadFileLike, 'name' | 'mim
   }
 
   const extension = getFileExtension(file.name)?.toLowerCase();
-  return !!extension && COMPRESSIBLE_IMAGE_EXTENSIONS.has(extension);
+  if (extension) {
+    return COMPRESSIBLE_IMAGE_EXTENSIONS.has(extension);
+  }
+
+  const mimeExtension = getExtensionForMimeType(mimeType)?.toLowerCase();
+  return !!mimeExtension && COMPRESSIBLE_IMAGE_EXTENSIONS.has(mimeExtension);
 }
 
 export function validateUploadFileNames(
-  files: Array<Pick<UploadFileLike, 'name' | 'mimeType'> & { originalName?: string }>
+  files: Array<Pick<UploadFileLike, 'name' | 'mimeType'> & { originalName?: string }>,
+  options: { convertToWebp?: boolean } = {}
 ): UploadFileNameValidationError | null {
   const seenNames = new Set<string>();
 
   for (const file of files) {
-    const validationError = validateUploadFileName(file.name, {
+    const resolvedName = resolvePreparedUploadFileName(file, {
+      fileName: file.name,
+      imageCompression: 'original',
+      convertToWebp: options.convertToWebp,
+    });
+
+    const validationError = validateUploadFileName(resolvedName, {
       mimeType: file.mimeType,
       originalName: file.originalName ?? file.name,
     });
     if (validationError) {
       return validationError;
     }
-
-    const resolvedName = resolveUploadFileName(file.name, {
-      mimeType: file.mimeType,
-      originalName: file.originalName ?? file.name,
-    });
 
     if (seenNames.has(resolvedName)) {
       return 'duplicate';
@@ -234,22 +241,45 @@ export function validateUploadFileNames(
   return null;
 }
 
-function resolveImageSaveFormat(fileName: string): SaveFormat {
+function resolveImageSaveFormat(fileName: string, convertToWebp = false): SaveFormat {
+  if (convertToWebp) return SaveFormat.WEBP;
+
   const extension = getFileExtension(fileName)?.toLowerCase();
   if (extension === 'png') return SaveFormat.PNG;
   if (extension === 'webp') return SaveFormat.WEBP;
   return SaveFormat.JPEG;
 }
 
+export function resolvePreparedUploadFileName(
+  file: Pick<UploadFileLike, 'name' | 'mimeType'>,
+  options: PrepareUploadFileOptions
+): string {
+  const resolvedName = resolveUploadFileName(options.fileName, {
+    mimeType: file.mimeType,
+    originalName: file.name,
+  });
+
+  if (!options.convertToWebp || !isCompressibleImageFile(file)) {
+    return resolvedName;
+  }
+
+  return resolveCompressedFileName(resolvedName, SaveFormat.WEBP);
+}
+
 export function estimateCompressedFileSize(
   file: Pick<UploadFileLike, 'name' | 'mimeType' | 'size'>,
-  imageCompression: UploadImageCompression
+  imageCompression: UploadImageCompression,
+  convertToWebp = false
 ): number | undefined {
-  if (file.size == null || imageCompression === 'original' || !isCompressibleImageFile(file)) {
+  if (
+    file.size == null ||
+    (imageCompression === 'original' && !convertToWebp) ||
+    !isCompressibleImageFile(file)
+  ) {
     return file.size;
   }
 
-  const format = resolveImageSaveFormat(file.name);
+  const format = resolveImageSaveFormat(file.name, convertToWebp);
   const ratioSet = IMAGE_SIZE_ESTIMATE_RATIO[imageCompression];
   const ratio =
     format === SaveFormat.PNG ? ratioSet.png : format === SaveFormat.WEBP ? ratioSet.webp : ratioSet.jpeg;
@@ -278,9 +308,10 @@ function resolveCompressedFileName(fileName: string, format: SaveFormat): string
 async function compressImageFile(
   file: UploadFileLike,
   resolvedName: string,
-  imageCompression: Exclude<UploadImageCompression, 'original'>
+  imageCompression: UploadImageCompression,
+  convertToWebp = false
 ): Promise<UploadFileLike> {
-  const format = resolveImageSaveFormat(resolvedName);
+  const format = resolveImageSaveFormat(resolvedName, convertToWebp);
   const compressed = await manipulateAsync(file.uri, [], {
     compress: IMAGE_COMPRESSION_QUALITY[imageCompression],
     format,
@@ -298,13 +329,14 @@ async function compressImageFile(
 
 export async function getRealCompressedFileSizePreview(
   file: UploadFileLike,
-  imageCompression: UploadImageCompression
+  imageCompression: UploadImageCompression,
+  convertToWebp = false
 ): Promise<number | undefined> {
-  if (imageCompression === 'original' || !isCompressibleImageFile(file)) {
+  if ((imageCompression === 'original' && !convertToWebp) || !isCompressibleImageFile(file)) {
     return file.size;
   }
 
-  const cacheKey = `${file.uri}|${file.name}|${imageCompression}`;
+  const cacheKey = `${file.uri}|${file.name}|${imageCompression}|${convertToWebp ? 'webp' : 'source'}`;
   const cached = compressionPreviewSizeCache.get(cacheKey);
   if (cached) return cached;
 
@@ -320,10 +352,10 @@ export async function getRealCompressedFileSizePreview(
 
     let previewFile: UploadFileLike | null = null;
     try {
-      previewFile = await compressImageFile(file, resolvedName, imageCompression);
+      previewFile = await compressImageFile(file, resolvedName, imageCompression, convertToWebp);
       return previewFile.size ?? originalSize;
     } catch {
-      return estimateCompressedFileSize(file, imageCompression);
+      return estimateCompressedFileSize(file, imageCompression, convertToWebp);
     } finally {
       if (previewFile && previewFile.uri !== file.uri) {
         await FileSystem.deleteAsync(previewFile.uri, { idempotent: true }).catch(() => {});
@@ -344,8 +376,9 @@ export async function prepareUploadFile(
     originalName: file.name,
   });
   const resolvedMimeType = file.mimeType || S3Service.guessMimeType(resolvedName);
+  const shouldConvertToWebp = !!options.convertToWebp && isCompressibleImageFile(file);
 
-  if (options.imageCompression === 'original' || !isCompressibleImageFile(file)) {
+  if ((options.imageCompression === 'original' && !shouldConvertToWebp) || !isCompressibleImageFile(file)) {
     return {
       ...file,
       name: resolvedName,
@@ -354,7 +387,12 @@ export async function prepareUploadFile(
   }
 
   try {
-    const compressedFile = await compressImageFile(file, resolvedName, options.imageCompression);
+    const compressedFile = await compressImageFile(
+      file,
+      resolvedName,
+      options.imageCompression,
+      shouldConvertToWebp
+    );
     const originalInfo =
       file.size != null ? { exists: true, size: file.size } : await FileSystem.getInfoAsync(file.uri);
     const compressedSize = compressedFile.size;
@@ -363,6 +401,7 @@ export async function prepareUploadFile(
     if (
       typeof compressedSize === 'number' &&
       typeof originalSize === 'number' &&
+      !shouldConvertToWebp &&
       compressedSize >= originalSize
     ) {
       return {

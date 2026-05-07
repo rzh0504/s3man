@@ -22,7 +22,6 @@ import { ObjectItem } from '@/components/object-item';
 import { Breadcrumb } from '@/components/breadcrumb';
 import { EmptyState } from '@/components/empty-state';
 import { FilePreview } from '@/components/file-preview';
-import { InfoTooltip } from '@/components/info-tooltip';
 import { UploadOptionsEditor, type UploadDraftFile } from '@/components/upload-options-editor';
 import { useObjectStore } from '@/lib/stores/object-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
@@ -311,6 +310,7 @@ export default function ObjectBrowserScreen() {
   const [pendingUploadPrefix, setPendingUploadPrefix] = React.useState('');
   const [imageCompression, setImageCompression] =
     React.useState<UploadImageCompression>('original');
+  const [convertToWebp, setConvertToWebp] = React.useState(false);
 
   // Delete folder
   const [deleteFolderTarget, setDeleteFolderTarget] = React.useState<S3Object | null>(null);
@@ -366,10 +366,11 @@ export default function ObjectBrowserScreen() {
         name: file.name,
         mimeType: file.mimeType,
         originalName: file.originalName,
-      }))
+      })),
+      { convertToWebp }
     );
     return getUploadConfigErrorText(validationError);
-  }, [getUploadConfigErrorText, pendingUploadFiles]);
+  }, [convertToWebp, getUploadConfigErrorText, pendingUploadFiles]);
 
   const getHasImmediateCache = React.useCallback(
     (prefix: string) => {
@@ -950,9 +951,11 @@ export default function ObjectBrowserScreen() {
           connectionId,
           bucket: bucketName,
           key: prefix + file.name,
+          keyPrefix: prefix,
           inputFile: file,
           targetFileName: file.name,
           imageCompression,
+          convertToWebp,
           addTask,
           updateTask,
           mapError: getReadableUploadError,
@@ -981,6 +984,7 @@ export default function ObjectBrowserScreen() {
         setPendingUploadFiles([]);
         setPendingUploadPrefix('');
         setImageCompression('original');
+        setConvertToWebp(false);
         return;
       }
 
@@ -993,6 +997,7 @@ export default function ObjectBrowserScreen() {
             setPendingUploadFiles([]);
             setPendingUploadPrefix('');
             setImageCompression('original');
+            setConvertToWebp(false);
           })();
         }, 1000);
         return;
@@ -1002,6 +1007,7 @@ export default function ObjectBrowserScreen() {
       setPendingUploadFiles([]);
       setPendingUploadPrefix('');
       setImageCompression('original');
+      setConvertToWebp(false);
     },
     [
       bucketName,
@@ -1011,6 +1017,7 @@ export default function ObjectBrowserScreen() {
       currentPrefix,
       uploadConfigError,
       imageCompression,
+      convertToWebp,
       addTask,
       updateTask,
       objects,
@@ -1027,6 +1034,7 @@ export default function ObjectBrowserScreen() {
       setPendingUploadFiles(files);
       setPendingUploadPrefix(prefix);
       setImageCompression('original');
+      setConvertToWebp(false);
       setShowUploadDialog(true);
     },
     []
@@ -1217,7 +1225,6 @@ export default function ObjectBrowserScreen() {
         <Text className="text-foreground flex-1 text-lg font-semibold" numberOfLines={1}>
           {bucketName}
         </Text>
-        {!selectionMode && selectedCount === 0 && <InfoTooltip text={t('bucket.longPressHint')} />}
         <Badge variant="secondary">
           <Text className="text-xs">{t('bucket.files', { count: fileCount })}</Text>
         </Badge>
@@ -1534,6 +1541,7 @@ export default function ObjectBrowserScreen() {
             setPendingUploadFiles([]);
             setPendingUploadPrefix('');
             setImageCompression('original');
+            setConvertToWebp(false);
           }
         }}>
         <DialogContent
@@ -1557,12 +1565,14 @@ export default function ObjectBrowserScreen() {
             <UploadOptionsEditor
               files={pendingUploadFiles}
               imageCompression={imageCompression}
+              convertToWebp={convertToWebp}
               onFileNameChange={(id, name) => {
                 setPendingUploadFiles((prev) =>
                   prev.map((file) => (file.id === id ? { ...file, name } : file))
                 );
               }}
               onImageCompressionChange={setImageCompression}
+              onConvertToWebpChange={setConvertToWebp}
               validationError={uploadConfigError}
             />
           </KeyboardAwareScrollView>
@@ -1579,6 +1589,7 @@ export default function ObjectBrowserScreen() {
                 setPendingUploadFiles([]);
                 setPendingUploadPrefix('');
                 setImageCompression('original');
+                setConvertToWebp(false);
               }}>
               <Text>{t('cancel')}</Text>
             </Button>

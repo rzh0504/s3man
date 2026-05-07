@@ -246,6 +246,7 @@ export default {
   'uploadConfig.imageCompression': '图片压缩',
   'uploadConfig.imageCompressionDesc':
     '将应用到 {count} 个 JPG、PNG、WebP 图片。HEIC、HEIF、GIF、SVG 将保持原样。',
+  'uploadConfig.convertToWebp': '转换为 WebP',
   'uploadConfig.keepOriginal': '原图',
   'uploadConfig.qualityHigh': '高质量',
   'uploadConfig.qualityMedium': '平衡',

@@ -251,6 +251,7 @@ export default {
   'uploadConfig.imageCompression': 'Image compression',
   'uploadConfig.imageCompressionDesc':
     'Applies to {count} JPG, PNG, and WebP images. HEIC, HEIF, GIF, and SVG keep their original format.',
+  'uploadConfig.convertToWebp': 'Convert to WebP',
   'uploadConfig.keepOriginal': 'Original',
   'uploadConfig.qualityHigh': 'High quality',
   'uploadConfig.qualityMedium': 'Balanced',

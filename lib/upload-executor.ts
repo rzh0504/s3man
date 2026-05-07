@@ -11,9 +11,11 @@ export interface RunUploadTaskOptions {
   connectionId: string;
   bucket: string;
   key: string;
+  keyPrefix?: string;
   inputFile: UploadFileLike;
   targetFileName: string;
   imageCompression: UploadImageCompression;
+  convertToWebp?: boolean;
   addTask: (task: TransferTask) => void;
   updateTask: (id: string, updates: Partial<TransferTask>) => void;
   mapError?: (error: unknown) => string;
@@ -33,9 +35,11 @@ export async function runUploadTask({
   connectionId,
   bucket,
   key,
+  keyPrefix,
   inputFile,
   targetFileName,
   imageCompression,
+  convertToWebp,
   addTask,
   updateTask,
   mapError,
@@ -50,9 +54,11 @@ export async function runUploadTask({
     const uploadFile = await prepareUploadFile(inputFile, {
       fileName: targetFileName,
       imageCompression,
+      convertToWebp,
     });
     await onPreparedFile?.(uploadFile);
 
+    const uploadKey = keyPrefix != null ? keyPrefix + uploadFile.name : key;
     const mimeType = uploadFile.mimeType || S3Service.guessMimeType(uploadFile.name);
     const fileSize = uploadFile.size ?? 0;
     const activeTaskId = generateId();
@@ -67,13 +73,13 @@ export async function runUploadTask({
       totalBytes: fileSize,
       transferredBytes: 0,
       bucket,
-      key,
+      key: uploadKey,
       connectionId,
       localPath: uploadFile.uri,
       startedAt: new Date().toISOString(),
     });
 
-    const presignedUrl = await S3Service.getPresignedUploadUrl(connectionId, bucket, key, mimeType);
+    const presignedUrl = await S3Service.getPresignedUploadUrl(connectionId, bucket, uploadKey, mimeType);
 
     let currentProgress = initialProgress;
     onProgress?.(currentProgress);
@@ -115,7 +121,7 @@ export async function runUploadTask({
       success: true,
       file: uploadFile,
       object: {
-        key,
+        key: uploadKey,
         name: uploadFile.name,
         size: fileSize,
         lastModified: new Date().toISOString(),

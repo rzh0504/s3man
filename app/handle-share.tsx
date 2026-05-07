@@ -169,6 +169,7 @@ export default function HandleShareScreen() {
   const [loading, setLoading] = React.useState(true);
   const [imageCompression, setImageCompression] =
     React.useState<UploadImageCompression>('original');
+  const [convertToWebp, setConvertToWebp] = React.useState(false);
 
   // Destination selection
   const [selectedConnectionId, setSelectedConnectionId] = React.useState<string | null>(null);
@@ -248,10 +249,11 @@ export default function HandleShareScreen() {
         name: file.name,
         mimeType: file.mimeType,
         originalName: file.originalName,
-      }))
+      })),
+      { convertToWebp }
     );
     return getUploadConfigErrorText(validationError);
-  }, [getUploadConfigErrorText, sharedFiles]);
+  }, [convertToWebp, getUploadConfigErrorText, sharedFiles]);
 
   const resolveSharedFileForUpload = React.useCallback(
     async (file: SharedFile, index: number): Promise<SharedFile> => {
@@ -416,9 +418,11 @@ export default function HandleShareScreen() {
           connectionId: selectedConnectionId,
           bucket: selectedBucket,
           key: sharedFiles[i].name,
+          keyPrefix: '',
           inputFile: preparedFile,
           targetFileName: sharedFiles[i].name,
           imageCompression,
+          convertToWebp,
           addTask,
           updateTask,
           mapError: getReadableUploadError,
@@ -465,6 +469,7 @@ export default function HandleShareScreen() {
     resolveSharedFileForUpload,
     syncPreparedFile,
     imageCompression,
+    convertToWebp,
     uploadConfigError,
   ]);
 
@@ -567,6 +572,7 @@ export default function HandleShareScreen() {
               <UploadOptionsEditor
                 files={sharedFiles}
                 imageCompression={imageCompression}
+                convertToWebp={convertToWebp}
                 onFileNameChange={(id, name) => {
                   setSharedFiles((prev) =>
                     prev.map((file) => (file.id === id ? { ...file, name } : file))
@@ -578,6 +584,7 @@ export default function HandleShareScreen() {
                   );
                 }}
                 onImageCompressionChange={setImageCompression}
+                onConvertToWebpChange={setConvertToWebp}
                 validationError={uploadConfigError}
               />
             )}
