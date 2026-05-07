@@ -65,6 +65,7 @@ export default {
   'settings.downloadDirectoryOtherDesc': '自定义目录目前仅支持 Android，其他平台会保存到应用内部存储。',
   'settings.chooseDownloadDirectory': '选择文件夹',
   'settings.resetDownloadDirectory': '使用默认目录',
+  'settings.about': '关于',
 
   // ── 连接管理 ───────────────────────────────────────────────────────────
   'conn.title': '连接管理',

@@ -69,6 +69,7 @@ export default {
     'Custom folders are only supported on Android. Other platforms save into app storage.',
   'settings.chooseDownloadDirectory': 'Choose Folder',
   'settings.resetDownloadDirectory': 'Use Default',
+  'settings.about': 'About',
 
   // ── Connections ────────────────────────────────────────────────────────
   'conn.title': 'Connection',

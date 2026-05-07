@@ -24,6 +24,7 @@ import {
 } from 'lucide-react-native';
 
 import * as FileSystem from 'expo-file-system/legacy';
+import Constants from 'expo-constants';
 import * as React from 'react';
 import { View, ScrollView, Pressable, Alert, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -64,6 +65,7 @@ export default function ConfigScreen() {
   } = useSettingsStore();
 
   const connectedCount = connections.filter((c) => c.status === 'connected').length;
+  const appVersion = Constants.expoConfig?.version ?? '1.0.6';
 
   const themeScale = useSharedValue(1);
 
@@ -322,6 +324,14 @@ export default function ConfigScreen() {
                   <Icon as={LanguagesIcon} className="text-muted-foreground size-5" />
                 </Pressable>
               </View>
+            </View>
+
+            <Separator />
+
+            {/* About */}
+            <View className="flex-row items-center gap-3 px-4 py-3.5">
+              <Text className="text-foreground flex-1 text-sm font-medium">{t('settings.about')}</Text>
+              <Text className="text-muted-foreground text-sm">v{appVersion}</Text>
             </View>
           </View>
         </NativeOnlyAnimatedView>
