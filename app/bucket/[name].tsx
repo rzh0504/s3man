@@ -41,12 +41,16 @@ import {
   PlusIcon,
   ImageIcon,
   FileIcon,
+  SearchIcon,
+  ArrowUpDownIcon,
+  CopyIcon,
+  PencilIcon,
+  MoveIcon,
 } from 'lucide-react-native';
 import * as React from 'react';
 import {
   View,
-  FlatList,
-  RefreshControl,
+  ScrollView,
   Pressable,
   Platform,
   Share,
@@ -54,14 +58,17 @@ import {
   BackHandler,
   Alert,
   ToastAndroid,
+  TextInput,
   useWindowDimensions,
-  type ViewToken,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
+import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Clipboard from 'expo-clipboard';
+import { FlashList } from '@shopify/flash-list';
 import type { S3Object, TransferTask } from '@/lib/types';
 import { Progress } from '@/components/ui/progress';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
@@ -76,6 +83,10 @@ import {
 import { useSettingsStore } from '@/lib/stores/settings-store';
 import { useT } from '@/lib/i18n';
 import { runUploadTask } from '@/lib/upload-executor';
+import {
+  registerTransferController,
+  unregisterTransferController,
+} from '@/lib/transfer-controller';
 import {
   IMAGE_COMPRESSION_FAILED_ERROR,
   resolveInitialUploadFileName,
@@ -94,12 +105,96 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
+const TEXT_PREVIEW_MAX_BYTES = 102400;
+
+type ObjectSortMode = 'name' | 'date' | 'size';
+type ObjectTypeFilter = 'all' | 'images' | 'media' | 'docs' | 'other';
+type ObjectAction = 'rename' | 'copy' | 'move';
+type ThumbnailUrlEntry = { url: string; createdAt: number };
+type SearchResultState = { query: string; objects: S3Object[] } | null;
+
+const OBJECT_TYPE_FILTERS: ObjectTypeFilter[] = ['all', 'images', 'media', 'docs', 'other'];
+const OBJECT_SORT_MODES: ObjectSortMode[] = ['name', 'date', 'size'];
+const THUMBNAIL_URL_TTL_MS = 25 * 60 * 1000;
+const FAILED_THUMBNAIL_RETRY_MS = 10 * 60 * 1000;
+const SEARCH_BUSY_DELAY_MS = 250;
+
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
 function compareObjectNames(a: S3Object, b: S3Object): number {
   return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+}
+
+function getObjectParentPrefix(key: string): string {
+  const index = key.lastIndexOf('/');
+  return index >= 0 ? key.slice(0, index + 1) : '';
+}
+
+function getObjectFileName(key: string): string {
+  const normalized = key.replace(/\/$/, '');
+  const index = normalized.lastIndexOf('/');
+  return index >= 0 ? normalized.slice(index + 1) : normalized;
+}
+
+function matchesTypeFilter(object: S3Object, filter: ObjectTypeFilter): boolean {
+  if (filter === 'all') return true;
+  if (object.isFolder) return false;
+  if (filter === 'images') return S3Service.isImageFile(object.name);
+  if (filter === 'media') {
+    return S3Service.isAudioFile(object.name) || S3Service.isVideoFile(object.name);
+  }
+  if (filter === 'docs') {
+    return S3Service.isCodeFile(object.name) || S3Service.isPdfFile(object.name);
+  }
+  return (
+    !S3Service.isImageFile(object.name) &&
+    !S3Service.isAudioFile(object.name) &&
+    !S3Service.isVideoFile(object.name) &&
+    !S3Service.isCodeFile(object.name) &&
+    !S3Service.isPdfFile(object.name)
+  );
+}
+
+function getEmptyObjectTitleKey(filter: ObjectTypeFilter, hasSearchQuery: boolean) {
+  if (hasSearchQuery) return 'bucket.emptySearch';
+  if (filter === 'images') return 'bucket.emptyImages';
+  if (filter === 'media') return 'bucket.emptyMedia';
+  if (filter === 'docs') return 'bucket.emptyDocs';
+  if (filter === 'other') return 'bucket.emptyOther';
+  return 'bucket.emptyFiles';
+}
+
+function getThumbnailCacheKey(connectionId: string, bucket: string, object: S3Object): string {
+  return [connectionId, bucket, object.key, object.size ?? '', object.lastModified ?? ''].join(':');
+}
+
+function compareObjectsBySort(a: S3Object, b: S3Object, sortMode: ObjectSortMode): number {
+  if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
+  if (sortMode === 'date') {
+    return new Date(b.lastModified ?? 0).getTime() - new Date(a.lastModified ?? 0).getTime();
+  }
+  if (sortMode === 'size') {
+    return (b.size ?? 0) - (a.size ?? 0);
+  }
+  return compareObjectNames(a, b);
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  let index = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (index < items.length) {
+      const item = items[index];
+      index += 1;
+      await worker(item);
+    }
+  });
+  await Promise.all(workers);
 }
 
 function mergeUploadedObjects(existing: S3Object[], uploaded: S3Object[]): S3Object[] {
@@ -126,20 +221,16 @@ function mergeCreatedFolder(existing: S3Object[], createdFolder: S3Object): S3Ob
   return [...Array.from(nextFolders.values()).sort(compareObjectNames), ...fileEntries];
 }
 
-function silentlyReconcileObjects(
-  connectionId: string,
-  bucketName: string,
-  prefix: string
-): void {
-  void S3Service.listObjectsFresh(connectionId, bucketName, prefix)
-    .then((freshObjects) => {
+function silentlyReconcileObjects(connectionId: string, bucketName: string, prefix: string): void {
+  void S3Service.listObjectsPage(connectionId, bucketName, prefix)
+    .then((page) => {
       const state = useObjectStore.getState();
       if (
         state.currentConnectionId === connectionId &&
         state.currentBucket === bucketName &&
         state.currentPrefix === prefix
       ) {
-        state.setObjects(freshObjects);
+        state.setObjects(page.objects);
       }
     })
     .catch(() => {
@@ -147,9 +238,7 @@ function silentlyReconcileObjects(
     });
 }
 
-function createUploadDraft(
-  asset: DocumentPicker.DocumentPickerAsset
-): UploadDraftFile {
+function createUploadDraft(asset: DocumentPicker.DocumentPickerAsset): UploadDraftFile {
   const normalizedName = resolveInitialUploadFileName({
     providedName: asset.name,
     mimeType: asset.mimeType ?? undefined,
@@ -232,7 +321,6 @@ export default function ObjectBrowserScreen() {
     clearBucketSnapshots,
     setLoading,
     toggleSelection,
-    selectAll,
     clearSelection,
     breadcrumbs,
   } = useObjectStore();
@@ -299,6 +387,15 @@ export default function ObjectBrowserScreen() {
 
   // Expandable FAB
   const [fabExpanded, setFabExpanded] = React.useState(false);
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [sortMode, setSortMode] = React.useState<ObjectSortMode>('name');
+  const [typeFilter, setTypeFilter] = React.useState<ObjectTypeFilter>('all');
+  const [noticeMessage, setNoticeMessage] = React.useState<string | null>(null);
+  const [noticeIsError, setNoticeIsError] = React.useState(false);
+  const [objectAction, setObjectAction] = React.useState<ObjectAction | null>(null);
+  const [objectActionTarget, setObjectActionTarget] = React.useState<S3Object | null>(null);
+  const [objectActionKey, setObjectActionKey] = React.useState('');
+  const [isObjectActionRunning, setIsObjectActionRunning] = React.useState(false);
 
   // Create folder
   const [showCreateFolderDialog, setShowCreateFolderDialog] = React.useState(false);
@@ -318,27 +415,95 @@ export default function ObjectBrowserScreen() {
   const [isDeletingFolder, setIsDeletingFolder] = React.useState(false);
 
   // Thumbnail presigned URLs cache
-  const [thumbnailUrls, setThumbnailUrls] = React.useState<Record<string, string>>({});
+  const [thumbnailUrls, setThumbnailUrls] = React.useState<Record<string, ThumbnailUrlEntry>>({});
+  const [failedThumbnailKeys, setFailedThumbnailKeys] = React.useState<Record<string, number>>({});
   const [visibleImageKeys, setVisibleImageKeys] = React.useState<string[]>([]);
+  const [searchResults, setSearchResults] = React.useState<SearchResultState>(null);
+  const [isSearchingBucket, setIsSearchingBucket] = React.useState(false);
+  const [showSearchBusy, setShowSearchBusy] = React.useState(false);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState('');
   const showThumbnails = useSettingsStore((s) => s.showThumbnails);
   const downloadDirectoryUri = useSettingsStore((s) => s.downloadDirectoryUri);
   const downloadDirectoryName = useSettingsStore((s) => s.downloadDirectoryName);
+  const transferConcurrency = useSettingsStore((s) => s.transferConcurrency);
   const loadRequestIdRef = React.useRef(0);
+  const searchRequestIdRef = React.useRef(0);
+  const [nextContinuationToken, setNextContinuationToken] = React.useState<string | undefined>();
+  const [isLoadingMore, setIsLoadingMore] = React.useState(false);
 
-  const showSystemToast = React.useCallback(
-    (message: string) => {
-      if (Platform.OS === 'android') {
-        ToastAndroid.show(message, ToastAndroid.SHORT);
-        return;
-      }
-      Alert.alert('', message);
+  const showSystemToast = React.useCallback((message: string) => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('', message);
+  }, []);
+
+  const showNotice = React.useCallback(
+    (message: string, isError = false) => {
+      setNoticeMessage(message);
+      setNoticeIsError(isError);
+      showSystemToast(message);
+      setTimeout(() => setNoticeMessage(null), 3500);
     },
-    []
+    [showSystemToast]
   );
 
   const crumbs = React.useMemo(() => breadcrumbs(), [currentPrefix]);
   const selectedCount = selectedKeys.size;
   const fileCount = objects.filter((o) => !o.isFolder).length;
+  const proxyHeaders = React.useMemo(
+    () => (connectionId ? S3Service.getProxyHeaders(connectionId) : null),
+    [connectionId]
+  );
+  const normalizedSearchQuery = searchQuery.trim();
+  const hasSearchQuery = normalizedSearchQuery.length > 0;
+  const immediateFilteredObjects = React.useMemo(() => {
+    const query = normalizedSearchQuery.toLowerCase();
+    return objects
+      .filter(
+        (object) =>
+          !query ||
+          object.name.toLowerCase().includes(query) ||
+          object.key.toLowerCase().includes(query)
+      )
+      .filter((object) => matchesTypeFilter(object, typeFilter))
+      .slice()
+      .sort((a, b) => compareObjectsBySort(a, b, sortMode));
+  }, [objects, normalizedSearchQuery, sortMode, typeFilter]);
+  const filteredObjects = React.useMemo(() => {
+    if (hasSearchQuery && searchResults?.query === normalizedSearchQuery) {
+      return searchResults.objects
+        .filter((object) => matchesTypeFilter(object, typeFilter))
+        .slice()
+        .sort((a, b) => compareObjectsBySort(a, b, sortMode));
+    }
+    return immediateFilteredObjects;
+  }, [
+    hasSearchQuery,
+    immediateFilteredObjects,
+    normalizedSearchQuery,
+    searchResults,
+    sortMode,
+    typeFilter,
+  ]);
+  const visibleFileCount = filteredObjects.filter((o) => !o.isFolder).length;
+  const selectedObjects = React.useMemo(() => {
+    const byKey = new Map<string, S3Object>();
+    for (const object of objects) byKey.set(object.key, object);
+    for (const object of searchResults?.objects ?? []) byKey.set(object.key, object);
+    return Array.from(byKey.values()).filter((o) => selectedKeys.has(o.key) && !o.isFolder);
+  }, [objects, searchResults, selectedKeys]);
+  const shouldShowSearchBusy =
+    hasSearchQuery && isSearchingBucket && showSearchBusy && immediateFilteredObjects.length === 0;
+  const prewarmImageKeys = React.useMemo(
+    () =>
+      filteredObjects
+        .filter((object) => !object.isFolder && S3Service.isImageFile(object.name))
+        .slice(0, 12)
+        .map((object) => object.key),
+    [filteredObjects]
+  );
   const getUploadConfigErrorText = React.useCallback(
     (error: UploadFileNameValidationError | null) => {
       switch (error) {
@@ -391,27 +556,22 @@ export default function ObjectBrowserScreen() {
 
   React.useEffect(() => {
     setInitialLoaded(getHasImmediateCache(currentPrefix));
-    setThumbnailUrls({});
     setVisibleImageKeys([]);
+    setNextContinuationToken(undefined);
   }, [currentPrefix, getHasImmediateCache]);
 
   const transitionToPrefix = React.useCallback(
     (nextPrefix: string) => {
       setInitialLoaded(getHasImmediateCache(nextPrefix));
-      setThumbnailUrls({});
       setVisibleImageKeys([]);
+      setNextContinuationToken(undefined);
       setCurrentPrefix(nextPrefix);
     },
     [getHasImmediateCache, setCurrentPrefix]
   );
 
   const isLoadRequestActive = React.useCallback(
-    (
-      requestId: number,
-      targetConnectionId: string,
-      targetBucket: string,
-      targetPrefix: string
-    ) => {
+    (requestId: number, targetConnectionId: string, targetBucket: string, targetPrefix: string) => {
       const state = useObjectStore.getState();
       return (
         loadRequestIdRef.current === requestId &&
@@ -473,7 +633,7 @@ export default function ObjectBrowserScreen() {
         }
 
         try {
-          const fresh = await S3Service.listObjectsFresh(
+          const fresh = await S3Service.listObjectsPage(
             targetConnectionId,
             targetBucket,
             targetPrefix
@@ -481,13 +641,14 @@ export default function ObjectBrowserScreen() {
           if (!isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
             return;
           }
-          setObjects(fresh);
+          setObjects(fresh.objects);
+          setNextContinuationToken(fresh.nextContinuationToken);
         } catch (error: any) {
           if (
             !hasImmediateData &&
             isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)
           ) {
-            console.error('Failed to load objects:', error);
+            showNotice(error?.message || 'Failed to load objects', true);
           }
         } finally {
           if (isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
@@ -498,7 +659,7 @@ export default function ObjectBrowserScreen() {
       } else {
         setLoading(true);
         try {
-          const fresh = await S3Service.listObjectsFresh(
+          const fresh = await S3Service.listObjectsPage(
             targetConnectionId,
             targetBucket,
             targetPrefix
@@ -506,10 +667,11 @@ export default function ObjectBrowserScreen() {
           if (!isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
             return;
           }
-          setObjects(fresh);
+          setObjects(fresh.objects);
+          setNextContinuationToken(fresh.nextContinuationToken);
         } catch (error: any) {
           if (isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
-            console.error('Failed to load objects:', error);
+            showNotice(error?.message || 'Failed to load objects', true);
           }
         } finally {
           if (isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
@@ -530,6 +692,7 @@ export default function ObjectBrowserScreen() {
       loadCachedObjects,
       setLoading,
       isLoadRequestActive,
+      showNotice,
     ]
   );
 
@@ -537,8 +700,101 @@ export default function ObjectBrowserScreen() {
     loadObjects();
   }, [loadObjects]);
 
+  React.useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchQuery(normalizedSearchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [normalizedSearchQuery]);
+
+  React.useEffect(() => {
+    if (!connectionId || !bucketName || !debouncedSearchQuery) {
+      searchRequestIdRef.current += 1;
+      setSearchResults(null);
+      setIsSearchingBucket(false);
+      setShowSearchBusy(false);
+      return;
+    }
+
+    const requestId = ++searchRequestIdRef.current;
+    let cancelled = false;
+    setIsSearchingBucket(true);
+    setShowSearchBusy(false);
+
+    const busyTimer = setTimeout(() => {
+      if (!cancelled && searchRequestIdRef.current === requestId) {
+        setShowSearchBusy(true);
+      }
+    }, SEARCH_BUSY_DELAY_MS);
+
+    S3Service.searchObjects(connectionId, bucketName, debouncedSearchQuery)
+      .then((objects) => {
+        if (!cancelled && searchRequestIdRef.current === requestId) {
+          setSearchResults({ query: debouncedSearchQuery, objects });
+        }
+      })
+      .catch((error: any) => {
+        if (!cancelled && searchRequestIdRef.current === requestId) {
+          showNotice(error?.message || t('bucket.searchFailed'), true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled && searchRequestIdRef.current === requestId) {
+          setIsSearchingBucket(false);
+          setShowSearchBusy(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      clearTimeout(busyTimer);
+    };
+  }, [bucketName, connectionId, debouncedSearchQuery, showNotice, t]);
+
+  const loadMoreObjects = React.useCallback(async () => {
+    if (!bucketName || !connectionId || !nextContinuationToken || isLoadingMore) return;
+    const targetConnectionId = connectionId;
+    const targetBucket = bucketName;
+    const targetPrefix = currentPrefix;
+    setIsLoadingMore(true);
+
+    try {
+      const page = await S3Service.listObjectsPage(
+        targetConnectionId,
+        targetBucket,
+        targetPrefix,
+        nextContinuationToken
+      );
+      const state = useObjectStore.getState();
+      if (
+        state.currentConnectionId !== targetConnectionId ||
+        state.currentBucket !== targetBucket ||
+        state.currentPrefix !== targetPrefix
+      ) {
+        return;
+      }
+      const existingKeys = new Set(state.objects.map((item) => item.key));
+      const merged = [
+        ...state.objects,
+        ...page.objects.filter((item) => !existingKeys.has(item.key)),
+      ];
+      setObjects(merged);
+      setNextContinuationToken(page.nextContinuationToken);
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : 'Failed to load more objects', true);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [
+    bucketName,
+    connectionId,
+    currentPrefix,
+    isLoadingMore,
+    nextContinuationToken,
+    setObjects,
+    showNotice,
+  ]);
+
   const onViewableItemsChanged = React.useCallback(
-    ({ viewableItems }: { viewableItems: Array<ViewToken> }) => {
+    ({ viewableItems }: { viewableItems: Array<{ item?: S3Object }> }) => {
       const nextKeys = viewableItems
         .map((token) => token.item as S3Object | undefined)
         .filter(
@@ -548,7 +804,10 @@ export default function ObjectBrowserScreen() {
         .map((item) => item.key);
 
       setVisibleImageKeys((prev) => {
-        if (prev.length === nextKeys.length && prev.every((key, index) => key === nextKeys[index])) {
+        if (
+          prev.length === nextKeys.length &&
+          prev.every((key, index) => key === nextKeys[index])
+        ) {
           return prev;
         }
         return nextKeys;
@@ -556,6 +815,10 @@ export default function ObjectBrowserScreen() {
     },
     []
   );
+
+  const handleThumbnailError = React.useCallback((key: string) => {
+    setFailedThumbnailKeys((prev) => ({ ...prev, [key]: Date.now() }));
+  }, []);
 
   const viewabilityConfig = React.useRef({ itemVisiblePercentThreshold: 60 }).current;
 
@@ -565,7 +828,14 @@ export default function ObjectBrowserScreen() {
     }
     let cancelled = false;
 
-    const pendingKeys = visibleImageKeys.filter((key) => !thumbnailUrls[key]);
+    const now = Date.now();
+    const candidateKeys = Array.from(new Set([...prewarmImageKeys, ...visibleImageKeys]));
+    const pendingKeys = candidateKeys.filter((key) => {
+      const entry = thumbnailUrls[key];
+      const failedAt = failedThumbnailKeys[key];
+      if (failedAt && now - failedAt < FAILED_THUMBNAIL_RETRY_MS) return false;
+      return !entry || now - entry.createdAt > THUMBNAIL_URL_TTL_MS;
+    });
     if (pendingKeys.length === 0) {
       return;
     }
@@ -573,17 +843,44 @@ export default function ObjectBrowserScreen() {
     S3Service.batchGetFileUrls(connectionId, bucketName, pendingKeys.slice(0, 12), 1800)
       .then((urls) => {
         if (!cancelled) {
-          setThumbnailUrls((prev) => ({ ...prev, ...urls }));
+          const createdAt = Date.now();
+          setThumbnailUrls((prev) => {
+            const next = { ...prev };
+            for (const [key, url] of Object.entries(urls)) {
+              next[key] = { url, createdAt };
+            }
+            return next;
+          });
+          void ExpoImage.prefetch(Object.values(urls), {
+            cachePolicy: 'memory-disk',
+            headers: proxyHeaders ?? undefined,
+          });
         }
       })
       .catch(() => {
-        // Silently skip thumbnail failures
+        if (!cancelled) {
+          const failedAt = Date.now();
+          setFailedThumbnailKeys((prev) => {
+            const next = { ...prev };
+            for (const key of pendingKeys) next[key] = failedAt;
+            return next;
+          });
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [visibleImageKeys, thumbnailUrls, connectionId, bucketName, showThumbnails]);
+  }, [
+    visibleImageKeys,
+    prewarmImageKeys,
+    thumbnailUrls,
+    failedThumbnailKeys,
+    connectionId,
+    bucketName,
+    proxyHeaders,
+    showThumbnails,
+  ]);
 
   const handleFolderPress = React.useCallback(
     (folder: S3Object) => {
@@ -654,8 +951,7 @@ export default function ObjectBrowserScreen() {
       setDeleteFolderTarget(null);
       invalidateBucketCache(connectionId, bucketName);
       const canIncrementallyRefresh =
-        currentConnectionId === connectionId &&
-        currentBucket === bucketName;
+        currentConnectionId === connectionId && currentBucket === bucketName;
 
       if (canIncrementallyRefresh) {
         setObjects(objects.filter((item) => item.key !== deleteFolderTarget.key));
@@ -723,16 +1019,15 @@ export default function ObjectBrowserScreen() {
           setPreviewUrl(url);
         } else if (S3Service.isPdfFile(obj.name)) {
           // PDF: store the URL so preview can offer "open in browser"
-          setPreviewUrl(url);
+          setPreviewUrl(await S3Service.getShareUrl(connectionId, bucketName, obj.key));
         } else if (S3Service.isCodeFile(obj.name)) {
-          // Fetch text content for code/text files
+          // Fetch only the preview slice so large files do not get fully loaded into memory.
           const headers = S3Service.getProxyHeaders(connectionId) || {};
+          headers.Range = `bytes=0-${TEXT_PREVIEW_MAX_BYTES - 1}`;
           const response = await fetch(url, { headers });
           const text = await response.text();
-          // Limit to 100KB for display
-          setPreviewText(
-            text.length > 102400 ? text.slice(0, 102400) + '\n\n... (truncated)' : text
-          );
+          const isTruncated = (obj.size ?? 0) > TEXT_PREVIEW_MAX_BYTES;
+          setPreviewText(isTruncated ? text + '\n\n... (truncated)' : text);
         }
       } catch (error: any) {
         console.error('Preview error:', error);
@@ -763,10 +1058,13 @@ export default function ObjectBrowserScreen() {
         bucket: bucketName,
         key: obj.key,
         connectionId,
+        supportsPause: true,
         startedAt: new Date().toISOString(),
       };
       addTask(task);
       showSystemToast(t('bucket.downloadStarted', { name: obj.name }));
+      let wasCancelled = false;
+      let wasPaused = false;
 
       try {
         const url = await S3Service.getFileUrl(connectionId, bucketName, obj.key);
@@ -775,50 +1073,105 @@ export default function ObjectBrowserScreen() {
         const isImageDownload = S3Service.isImageFile(obj.name);
         updateTask(taskId, { progress: 10 });
 
-        const downloadResult = await FileSystem.downloadAsync(url, appDownloadUri, {
-          headers: S3Service.getProxyHeaders(connectionId) || undefined,
-        });
+        const finalizeDownload = async (downloadResult: FileSystem.FileSystemDownloadResult) => {
+          let finalUri = downloadResult.uri;
+          let locationLabel = defaultLocationLabel;
 
-        let finalUri = downloadResult.uri;
-        let locationLabel = defaultLocationLabel;
-
-        if (Platform.OS === 'android' && isSafDirectoryUri(downloadDirectoryUri)) {
-          finalUri = await copyFileToSafDirectoryAsync({
-            sourceUri: downloadResult.uri,
-            directoryUri: downloadDirectoryUri,
-            fileName: obj.name,
-            mimeType: S3Service.guessMimeType(obj.name),
-          });
-          locationLabel = formatDownloadDirectoryLabel(
-            downloadDirectoryName || getDownloadDirectoryNameFromUri(downloadDirectoryUri)
-          );
-          if (!isImageDownload) {
-            await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(() => {});
+          if (Platform.OS === 'android' && isSafDirectoryUri(downloadDirectoryUri)) {
+            finalUri = await copyFileToSafDirectoryAsync({
+              sourceUri: downloadResult.uri,
+              directoryUri: downloadDirectoryUri,
+              fileName: obj.name,
+              mimeType: S3Service.guessMimeType(obj.name),
+            });
+            locationLabel = formatDownloadDirectoryLabel(
+              downloadDirectoryName || getDownloadDirectoryNameFromUri(downloadDirectoryUri)
+            );
+            if (!isImageDownload) {
+              await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(
+                () => {}
+              );
+            }
           }
-        }
 
-        updateTask(taskId, {
-          progress: 100,
-          transferredBytes: obj.size ?? 0,
-          status: 'completed',
-          localPath: finalUri,
-          previewPath:
-            Platform.OS === 'android' && isSafDirectoryUri(downloadDirectoryUri) && isImageDownload
-              ? downloadResult.uri
-              : undefined,
-          completedAt: new Date().toISOString(),
+          unregisterTransferController(taskId);
+          updateTask(taskId, {
+            progress: 100,
+            transferredBytes: obj.size ?? 0,
+            status: 'completed',
+            localPath: finalUri,
+            previewPath:
+              Platform.OS === 'android' &&
+              isSafDirectoryUri(downloadDirectoryUri) &&
+              isImageDownload
+                ? downloadResult.uri
+                : undefined,
+            completedAt: new Date().toISOString(),
+          });
+          showSystemToast(
+            t('bucket.downloadCompleteDesc', { name: obj.name, location: locationLabel })
+          );
+        };
+
+        const downloadResumable = FileSystem.createDownloadResumable(
+          url,
+          appDownloadUri,
+          {
+            headers: S3Service.getProxyHeaders(connectionId) || undefined,
+          },
+          (data) => {
+            const expectedBytes =
+              data.totalBytesExpectedToWrite > 0 ? data.totalBytesExpectedToWrite : (obj.size ?? 0);
+            const progress =
+              expectedBytes > 0
+                ? Math.min(99, Math.round((data.totalBytesWritten / expectedBytes) * 100))
+                : 10;
+            updateTask(taskId, {
+              progress,
+              totalBytes: expectedBytes,
+              transferredBytes: data.totalBytesWritten,
+            });
+          }
+        );
+
+        registerTransferController(taskId, {
+          cancel: async () => {
+            wasCancelled = true;
+            await downloadResumable.cancelAsync();
+          },
+          pause: async () => {
+            wasPaused = true;
+            await downloadResumable.pauseAsync();
+          },
+          resume: async () => {
+            wasPaused = false;
+            const resumedResult = await downloadResumable.resumeAsync();
+            if (resumedResult) {
+              await finalizeDownload(resumedResult);
+            }
+          },
         });
-        showSystemToast(t('bucket.downloadCompleteDesc', { name: obj.name, location: locationLabel }));
+
+        const downloadResult = await downloadResumable.downloadAsync();
+        if (!downloadResult) {
+          if (wasPaused || wasCancelled) return;
+          throw new Error('Download stopped');
+        }
+        await finalizeDownload(downloadResult);
       } catch (error: any) {
         console.error('Download error:', error);
-        if (appDownloadUri) {
+        unregisterTransferController(taskId);
+        if (appDownloadUri && !wasPaused) {
           await FileSystem.deleteAsync(appDownloadUri, { idempotent: true }).catch(() => {});
         }
+        if (wasPaused) return;
         updateTask(taskId, {
           status: 'failed',
-          error: error.message || 'Download failed',
+          error: wasCancelled ? 'Cancelled' : error.message || 'Download failed',
         });
-        showSystemToast(error.message || t('bucket.downloadFailed'));
+        if (!wasCancelled) {
+          showSystemToast(error.message || t('bucket.downloadFailed'));
+        }
       }
     },
     [
@@ -834,25 +1187,21 @@ export default function ObjectBrowserScreen() {
   );
 
   const handlePull = React.useCallback(async () => {
-    const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
-    for (const obj of selected) {
-      downloadFile(obj);
-    }
+    void runWithConcurrency(selectedObjects, transferConcurrency, downloadFile);
     setSelectionMode(false);
     clearSelection();
-  }, [objects, selectedKeys, downloadFile, clearSelection]);
+  }, [selectedObjects, transferConcurrency, downloadFile, clearSelection]);
 
   // ── Delete selected files ────────────────────────────────────────────────
   const handleDelete = React.useCallback(() => {
     if (!bucketName || !connectionId) return;
-    const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
-    if (selected.length === 0) return;
+    if (selectedObjects.length === 0) return;
     setDeleteDialogOpen(true);
-  }, [bucketName, connectionId, objects, selectedKeys]);
+  }, [bucketName, connectionId, selectedObjects]);
 
   const confirmDelete = React.useCallback(async () => {
     if (!bucketName || !connectionId) return;
-    const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
+    const selected = selectedObjects;
     const selectedKeySet = new Set(selected.map((item) => item.key));
     setIsDeletingFiles(true);
     try {
@@ -866,11 +1215,15 @@ export default function ObjectBrowserScreen() {
       invalidateBucketCache(connectionId, bucketName);
 
       const canIncrementallyRefresh =
-        currentConnectionId === connectionId &&
-        currentBucket === bucketName;
+        currentConnectionId === connectionId && currentBucket === bucketName;
 
       if (canIncrementallyRefresh) {
         setObjects(objects.filter((item) => !selectedKeySet.has(item.key)));
+        setSearchResults((prev) =>
+          prev
+            ? { ...prev, objects: prev.objects.filter((item) => !selectedKeySet.has(item.key)) }
+            : prev
+        );
         silentlyReconcileObjects(connectionId, bucketName, currentPrefix);
       } else {
         await clearBucketSnapshots(connectionId, bucketName);
@@ -886,7 +1239,7 @@ export default function ObjectBrowserScreen() {
     bucketName,
     connectionId,
     objects,
-    selectedKeys,
+    selectedObjects,
     currentBucket,
     currentConnectionId,
     currentPrefix,
@@ -910,7 +1263,7 @@ export default function ObjectBrowserScreen() {
   // ── View / share URL ─────────────────────────────────────────────────────
   const handleShareUrls = React.useCallback(async () => {
     if (!bucketName || !connectionId) return;
-    const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
+    const selected = selectedObjects;
     if (selected.length === 0) return;
 
     try {
@@ -923,7 +1276,83 @@ export default function ObjectBrowserScreen() {
     } catch (error: any) {
       console.error('Share URL error:', error);
     }
-  }, [bucketName, connectionId, objects, selectedKeys]);
+  }, [bucketName, connectionId, selectedObjects]);
+
+  const handleCopyPaths = React.useCallback(async () => {
+    if (selectedObjects.length === 0) return;
+    await Clipboard.setStringAsync(selectedObjects.map((object) => object.key).join('\n'));
+    showNotice(selectedObjects.length === 1 ? t('bucket.pathCopied') : t('bucket.pathsCopied'));
+  }, [selectedObjects, showNotice, t]);
+
+  const openObjectAction = React.useCallback(
+    (action: ObjectAction) => {
+      const target = selectedObjects[0];
+      if (!target || selectedObjects.length !== 1) return;
+      setObjectAction(action);
+      setObjectActionTarget(target);
+      setObjectActionKey(
+        action === 'rename'
+          ? getObjectFileName(target.key)
+          : action === 'copy'
+            ? `${target.key}.copy`
+            : target.key
+      );
+    },
+    [selectedObjects]
+  );
+
+  const confirmObjectAction = React.useCallback(async () => {
+    if (!objectAction || !objectActionTarget || !bucketName || !connectionId) return;
+    const trimmedKey = objectActionKey.trim();
+    if (!trimmedKey) return;
+    const destinationKey =
+      objectAction === 'rename'
+        ? getObjectParentPrefix(objectActionTarget.key) + trimmedKey
+        : trimmedKey;
+
+    setIsObjectActionRunning(true);
+    try {
+      if (objectAction === 'copy') {
+        await S3Service.copyObject(
+          connectionId,
+          bucketName,
+          objectActionTarget.key,
+          destinationKey
+        );
+      } else {
+        await S3Service.moveObject(
+          connectionId,
+          bucketName,
+          objectActionTarget.key,
+          destinationKey
+        );
+      }
+      invalidateBucketCache(connectionId, bucketName);
+      await clearBucketSnapshots(connectionId, bucketName);
+      await loadObjects(true);
+      clearSelection();
+      setSelectionMode(false);
+      setObjectAction(null);
+      setObjectActionTarget(null);
+      setObjectActionKey('');
+      showNotice(t('bucket.actionSuccess'));
+    } catch (error: any) {
+      showNotice(error?.message || t('bucket.actionFailed'), true);
+    } finally {
+      setIsObjectActionRunning(false);
+    }
+  }, [
+    objectAction,
+    objectActionTarget,
+    bucketName,
+    connectionId,
+    objectActionKey,
+    clearBucketSnapshots,
+    loadObjects,
+    clearSelection,
+    showNotice,
+    t,
+  ]);
 
   const getReadableUploadError = React.useCallback(
     (error: unknown) => {
@@ -946,7 +1375,7 @@ export default function ObjectBrowserScreen() {
       setUploadBatch({ total: files.length, completed: 0 });
       const uploadedObjects: S3Object[] = [];
 
-      for (const file of files) {
+      await runWithConcurrency(files, transferConcurrency, async (file) => {
         const result = await runUploadTask({
           connectionId,
           bucket: bucketName,
@@ -968,7 +1397,7 @@ export default function ObjectBrowserScreen() {
         }
 
         setUploadBatch((prev) => (prev ? { ...prev, completed: prev.completed + 1 } : prev));
-      }
+      });
 
       invalidateBucketCache(connectionId, bucketName);
       const canIncrementallyRefresh =
@@ -1025,20 +1454,18 @@ export default function ObjectBrowserScreen() {
       clearBucketSnapshots,
       loadObjects,
       getReadableUploadError,
+      transferConcurrency,
     ]
   );
 
-  const openUploadConfigurator = React.useCallback(
-    (files: UploadDraftFile[], prefix: string) => {
-      if (files.length === 0) return;
-      setPendingUploadFiles(files);
-      setPendingUploadPrefix(prefix);
-      setImageCompression('original');
-      setConvertToWebp(false);
-      setShowUploadDialog(true);
-    },
-    []
-  );
+  const openUploadConfigurator = React.useCallback((files: UploadDraftFile[], prefix: string) => {
+    if (files.length === 0) return;
+    setPendingUploadFiles(files);
+    setPendingUploadPrefix(prefix);
+    setImageCompression('original');
+    setConvertToWebp(false);
+    setShowUploadDialog(true);
+  }, []);
 
   const handlePickFiles = React.useCallback(async () => {
     try {
@@ -1173,7 +1600,19 @@ export default function ObjectBrowserScreen() {
         object={item}
         isSelected={selectedKeys.has(item.key)}
         selectionMode={selectionMode}
-        thumbnailUrl={thumbnailUrls[item.key]}
+        thumbnailUrl={
+          failedThumbnailKeys[item.key] &&
+          Date.now() - failedThumbnailKeys[item.key] < FAILED_THUMBNAIL_RETRY_MS
+            ? null
+            : thumbnailUrls[item.key]?.url
+        }
+        thumbnailCacheKey={
+          connectionId && bucketName && S3Service.isImageFile(item.name)
+            ? getThumbnailCacheKey(connectionId, bucketName, item)
+            : null
+        }
+        thumbnailHeaders={proxyHeaders}
+        onThumbnailError={() => handleThumbnailError(item.key)}
         onPress={() => handleFilePress(item)}
         onToggle={() => toggleSelection(item.key)}
         onLongPress={
@@ -1185,6 +1624,11 @@ export default function ObjectBrowserScreen() {
       selectedKeys,
       selectionMode,
       thumbnailUrls,
+      failedThumbnailKeys,
+      connectionId,
+      bucketName,
+      proxyHeaders,
+      handleThumbnailError,
       handleFilePress,
       toggleSelection,
       handleFolderLongPress,
@@ -1199,10 +1643,10 @@ export default function ObjectBrowserScreen() {
         name: '..',
         isFolder: true,
       };
-      return [goUpItem, ...objects];
+      return [goUpItem, ...filteredObjects];
     }
-    return objects;
-  }, [objects, currentPrefix]);
+    return filteredObjects;
+  }, [filteredObjects, currentPrefix]);
 
   return (
     <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
@@ -1226,7 +1670,7 @@ export default function ObjectBrowserScreen() {
           {bucketName}
         </Text>
         <Badge variant="secondary">
-          <Text className="text-xs">{t('bucket.files', { count: fileCount })}</Text>
+          <Text className="text-xs">{t('bucket.files', { count: visibleFileCount })}</Text>
         </Badge>
       </View>
 
@@ -1235,14 +1679,96 @@ export default function ObjectBrowserScreen() {
         <Breadcrumb crumbs={crumbs} onPress={handleBreadcrumbPress} />
       </View>
 
+      {noticeMessage ? (
+        <NativeOnlyAnimatedView entering={fadeIn()} exiting={fadeOut()}>
+          <View className="px-4 pb-2">
+            <View
+              className={`rounded-lg px-3 py-2 ${noticeIsError ? 'bg-destructive/10' : 'bg-green-500/10'}`}>
+              <Text className={`text-sm ${noticeIsError ? 'text-destructive' : 'text-green-600'}`}>
+                {noticeMessage}
+              </Text>
+            </View>
+          </View>
+        </NativeOnlyAnimatedView>
+      ) : null}
+
+      <View className="gap-2 px-4 pb-2">
+        <View className="border-input bg-muted/40 flex-row items-center gap-2 rounded-xl border px-3 py-2">
+          <Icon as={SearchIcon} className="text-muted-foreground size-4" />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder={t('bucket.searchPlaceholder')}
+            className="text-foreground placeholder:text-muted-foreground h-8 flex-1 px-0 py-0 text-base"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+        <View className="flex-row gap-2">
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            className="bg-muted flex-1 rounded-lg"
+            contentContainerClassName="gap-1 p-1">
+            {OBJECT_TYPE_FILTERS.map((filter) => {
+              const isActive = typeFilter === filter;
+              const labelKey =
+                filter === 'all'
+                  ? 'bucket.filterAll'
+                  : filter === 'images'
+                    ? 'bucket.filterImages'
+                    : filter === 'media'
+                      ? 'bucket.filterMedia'
+                      : filter === 'docs'
+                        ? 'bucket.filterDocs'
+                        : 'bucket.filterOther';
+              return (
+                <Pressable
+                  key={filter}
+                  onPress={() => setTypeFilter(filter)}
+                  className={`min-w-16 items-center rounded-md px-3 py-1.5 ${isActive ? 'bg-background dark:bg-input/30' : ''}`}>
+                  <Text
+                    className={`text-xs ${isActive ? 'text-foreground font-medium' : 'text-muted-foreground'}`}
+                    numberOfLines={1}>
+                    {t(labelKey)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <Pressable
+            onPress={() => {
+              const index = OBJECT_SORT_MODES.indexOf(sortMode);
+              setSortMode(OBJECT_SORT_MODES[(index + 1) % OBJECT_SORT_MODES.length]);
+            }}
+            className="bg-muted flex-row items-center gap-1 rounded-lg px-3 py-2">
+            <Icon as={ArrowUpDownIcon} className="text-muted-foreground size-4" />
+            <Text className="text-muted-foreground text-xs">
+              {t(
+                sortMode === 'name'
+                  ? 'bucket.sortName'
+                  : sortMode === 'date'
+                    ? 'bucket.sortDate'
+                    : 'bucket.sortSize'
+              )}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+
       {/* Column Header */}
       <View className="flex-row items-center gap-3 px-4 py-2">
         {selectionMode && (
           <Checkbox
-            checked={fileCount > 0 && selectedKeys.size === fileCount}
+            checked={visibleFileCount > 0 && selectedKeys.size === visibleFileCount}
             onCheckedChange={(checked) => {
-              if (checked) selectAll();
-              else clearSelection();
+              if (checked) {
+                useObjectStore.setState({
+                  selectedKeys: new Set(
+                    filteredObjects.filter((o) => !o.isFolder).map((o) => o.key)
+                  ),
+                });
+              } else clearSelection();
             }}
           />
         )}
@@ -1264,14 +1790,13 @@ export default function ObjectBrowserScreen() {
           exiting={fadeOut()}
           className="flex-1">
           {initialLoaded ? (
-            <FlatList
+            <FlashList
               key={currentPrefix || '__root__'}
               data={listData}
               keyExtractor={(item) => item.key}
-              initialNumToRender={12}
-              maxToRenderPerBatch={12}
-              windowSize={5}
-              removeClippedSubviews={Platform.OS !== 'web'}
+              extraData={{ selectedKeys, selectionMode, thumbnailUrls, failedThumbnailKeys }}
+              drawDistance={480}
+              getItemType={(item) => (item.isFolder ? 'folder' : 'file')}
               onViewableItemsChanged={onViewableItemsChanged}
               viewabilityConfig={viewabilityConfig}
               renderItem={({ item }) => {
@@ -1287,19 +1812,35 @@ export default function ObjectBrowserScreen() {
                 }
                 return renderItem({ item });
               }}
-              refreshControl={
-                <RefreshControl
-                  refreshing={initialLoaded && isLoading}
-                  onRefresh={() => loadObjects(true)}
-                />
+              refreshing={initialLoaded && isLoading}
+              onRefresh={() => loadObjects(true)}
+              contentContainerStyle={{ paddingBottom: 96 }}
+              ListFooterComponent={
+                !hasSearchQuery && nextContinuationToken ? (
+                  <View className="px-4 py-4">
+                    <Button
+                      variant="outline"
+                      onPress={() => void loadMoreObjects()}
+                      disabled={isLoadingMore}
+                      className="flex-row items-center justify-center gap-2">
+                      {isLoadingMore ? <ActivityIndicator size="small" /> : null}
+                      <Text>{isLoadingMore ? t('bucket.loadingMore') : t('bucket.loadMore')}</Text>
+                    </Button>
+                  </View>
+                ) : null
               }
-              contentContainerClassName="pb-24"
               ListEmptyComponent={
-                <EmptyState
-                  icon={FolderIcon}
-                  title={t('bucket.empty')}
-                  description={t('bucket.emptyDesc')}
-                />
+                shouldShowSearchBusy ? (
+                  <View className="flex-1 items-center justify-center gap-3 px-8 py-20">
+                    <ActivityIndicator size="small" />
+                    <Text className="text-muted-foreground text-sm">{t('bucket.searching')}</Text>
+                  </View>
+                ) : (
+                  <EmptyState
+                    icon={FolderIcon}
+                    title={t(getEmptyObjectTitleKey(typeFilter, hasSearchQuery))}
+                  />
+                )
               }
             />
           ) : (
@@ -1356,6 +1897,34 @@ export default function ObjectBrowserScreen() {
                 </Text>
               </View>
               <View className="flex-row gap-2">
+                <Button variant="ghost" size="icon" onPress={handleCopyPaths} className="size-10">
+                  <Icon as={CopyIcon} className="text-foreground size-5" />
+                </Button>
+                {selectedObjects.length === 1 ? (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onPress={() => openObjectAction('rename')}
+                      className="size-10">
+                      <Icon as={PencilIcon} className="text-foreground size-5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onPress={() => openObjectAction('move')}
+                      className="size-10">
+                      <Icon as={MoveIcon} className="text-foreground size-5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onPress={() => openObjectAction('copy')}
+                      className="size-10">
+                      <Icon as={FileIcon} className="text-foreground size-5" />
+                    </Button>
+                  </>
+                ) : null}
                 <Button variant="ghost" size="icon" onPress={handleDelete} className="size-10">
                   <Icon as={Trash2Icon} className="text-destructive size-5" />
                 </Button>
@@ -1454,6 +2023,7 @@ export default function ObjectBrowserScreen() {
         onCopyLink={handlePreviewCopyLink}
         object={previewObject}
         previewUrl={previewUrl}
+        previewHeaders={proxyHeaders}
         textContent={previewText}
         isLoading={previewLoading}
       />
@@ -1465,7 +2035,7 @@ export default function ObjectBrowserScreen() {
             <AlertDialogTitle>{t('bucket.deleteFiles')}</AlertDialogTitle>
             <AlertDialogDescription>
               {t('bucket.deleteFilesDesc', {
-                count: objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder).length,
+                count: selectedObjects.length,
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1526,6 +2096,59 @@ export default function ObjectBrowserScreen() {
                 <ActivityIndicator size="small" color="white" />
               ) : (
                 <Text className="text-primary-foreground">{t('create')}</Text>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={objectAction !== null}
+        onOpenChange={(open) => {
+          if (!open && !isObjectActionRunning) {
+            setObjectAction(null);
+            setObjectActionTarget(null);
+            setObjectActionKey('');
+          }
+        }}>
+        <DialogContent className="sm:max-w-md" style={{ width: Math.min(viewportWidth - 32, 520) }}>
+          <DialogHeader>
+            <DialogTitle>
+              {objectAction === 'rename'
+                ? t('bucket.rename')
+                : objectAction === 'move'
+                  ? t('bucket.move')
+                  : t('bucket.copy')}
+            </DialogTitle>
+            <DialogDescription>{objectActionTarget?.name ?? ''}</DialogDescription>
+          </DialogHeader>
+          <View className="gap-2">
+            <Label>{t('bucket.destinationKey')}</Label>
+            <Input
+              value={objectActionKey}
+              onChangeText={setObjectActionKey}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onPress={() => {
+                setObjectAction(null);
+                setObjectActionTarget(null);
+                setObjectActionKey('');
+              }}
+              disabled={isObjectActionRunning}>
+              <Text>{t('cancel')}</Text>
+            </Button>
+            <Button
+              onPress={confirmObjectAction}
+              disabled={isObjectActionRunning || !objectActionKey.trim()}>
+              {isObjectActionRunning ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <Text className="text-primary-foreground">{t('save')}</Text>
               )}
             </Button>
           </DialogFooter>

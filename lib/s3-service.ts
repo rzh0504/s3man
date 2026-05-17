@@ -10,6 +10,11 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   GetBucketLocationCommand,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
+  CopyObjectCommand,
   type S3ClientConfig,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -38,6 +43,16 @@ interface ClientEntry {
   config: S3Config;
 }
 
+export interface ListObjectsPageResult {
+  objects: S3Object[];
+  nextContinuationToken?: string;
+}
+
+export interface CompletedUploadPart {
+  partNumber: number;
+  eTag: string;
+}
+
 const clientMap = new Map<string, ClientEntry>();
 
 /** Resolve the endpoint URL: use explicit override or build from provider/region/accountId */
@@ -63,7 +78,8 @@ export function createClientForConnection(connectionId: string, config: S3Config
       accessKeyId: sanitize(config.accessKeyId),
       secretAccessKey: sanitize(config.secretAccessKey),
     },
-    forcePathStyle: config.forcePathStyle ?? (config.provider === 'backblaze-b2' || config.provider === 'custom'),
+    forcePathStyle:
+      config.forcePathStyle ?? (config.provider === 'backblaze-b2' || config.provider === 'custom'),
   };
 
   if (endpoint) {
@@ -110,7 +126,8 @@ export async function discoverBuckets(config: S3Config): Promise<string[]> {
       accessKeyId: sanitize(config.accessKeyId),
       secretAccessKey: sanitize(config.secretAccessKey),
     },
-    forcePathStyle: config.forcePathStyle ?? (config.provider === 'backblaze-b2' || config.provider === 'custom'),
+    forcePathStyle:
+      config.forcePathStyle ?? (config.provider === 'backblaze-b2' || config.provider === 'custom'),
   };
   if (endpoint) {
     clientConfig.endpoint = endpoint;
@@ -169,7 +186,11 @@ export async function listBuckets(connectionId: string): Promise<BucketInfo[]> {
   return buckets;
 }
 
-export async function createBucket(connectionId: string, name: string, region?: string): Promise<void> {
+export async function createBucket(
+  connectionId: string,
+  name: string,
+  region?: string
+): Promise<void> {
   const { client, config } = getClientEntry(connectionId);
 
   const params: any = { Bucket: name };
@@ -206,48 +227,142 @@ export async function listObjects(
 
   const { client } = getClientEntry(connectionId);
 
+  const objects: S3Object[] = [];
+  let continuationToken: string | undefined;
+
+  do {
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        Delimiter: '/',
+        ContinuationToken: continuationToken,
+      })
+    );
+
+    if (response.CommonPrefixes) {
+      for (const cp of response.CommonPrefixes) {
+        if (cp.Prefix) {
+          const folderName = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
+          objects.push({
+            key: cp.Prefix,
+            name: folderName + '/',
+            isFolder: true,
+          });
+        }
+      }
+    }
+
+    if (response.Contents) {
+      for (const obj of response.Contents) {
+        if (obj.Key && obj.Key !== prefix) {
+          const fileName = obj.Key.slice(prefix.length);
+          if (fileName) {
+            objects.push({
+              key: obj.Key,
+              name: fileName,
+              size: obj.Size,
+              lastModified: obj.LastModified?.toISOString(),
+              isFolder: false,
+            });
+          }
+        }
+      }
+    }
+
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  // Cache for 60 seconds
+  objectListCache.set(cacheKey, objects, 60);
+  return objects;
+}
+
+export async function listObjectsPage(
+  connectionId: string,
+  bucket: string,
+  prefix: string = '',
+  continuationToken?: string,
+  maxKeys = 1000
+): Promise<ListObjectsPageResult> {
+  const { client } = getClientEntry(connectionId);
   const response = await client.send(
     new ListObjectsV2Command({
       Bucket: bucket,
       Prefix: prefix,
       Delimiter: '/',
+      ContinuationToken: continuationToken,
+      MaxKeys: maxKeys,
     })
   );
-
   const objects: S3Object[] = [];
 
-  if (response.CommonPrefixes) {
-    for (const cp of response.CommonPrefixes) {
-      if (cp.Prefix) {
-        const folderName = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
-        objects.push({
-          key: cp.Prefix,
-          name: folderName + '/',
-          isFolder: true,
-        });
-      }
-    }
+  for (const cp of response.CommonPrefixes ?? []) {
+    if (!cp.Prefix) continue;
+    const folderName = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
+    objects.push({
+      key: cp.Prefix,
+      name: folderName + '/',
+      isFolder: true,
+    });
   }
 
-  if (response.Contents) {
-    for (const obj of response.Contents) {
-      if (obj.Key && obj.Key !== prefix) {
-        const fileName = obj.Key.slice(prefix.length);
-        if (fileName) {
-          objects.push({
-            key: obj.Key,
-            name: fileName,
-            size: obj.Size,
-            lastModified: obj.LastModified?.toISOString(),
-            isFolder: false,
-          });
-        }
-      }
-    }
+  for (const obj of response.Contents ?? []) {
+    if (!obj.Key || obj.Key === prefix) continue;
+    const fileName = obj.Key.slice(prefix.length);
+    if (!fileName) continue;
+    objects.push({
+      key: obj.Key,
+      name: fileName,
+      size: obj.Size,
+      lastModified: obj.LastModified?.toISOString(),
+      isFolder: false,
+    });
   }
 
-  // Cache for 60 seconds
-  objectListCache.set(cacheKey, objects, 60);
+  return {
+    objects,
+    nextContinuationToken: response.IsTruncated ? response.NextContinuationToken : undefined,
+  };
+}
+
+export async function searchObjects(
+  connectionId: string,
+  bucket: string,
+  query: string
+): Promise<S3Object[]> {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return [];
+
+  const { client } = getClientEntry(connectionId);
+  const objects: S3Object[] = [];
+  let continuationToken: string | undefined;
+
+  do {
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000,
+      })
+    );
+
+    for (const obj of response.Contents ?? []) {
+      if (!obj.Key || obj.Key.endsWith('/')) continue;
+      const key = obj.Key;
+      if (!key.toLowerCase().includes(normalizedQuery)) continue;
+      objects.push({
+        key,
+        name: key,
+        size: obj.Size,
+        lastModified: obj.LastModified?.toISOString(),
+        isFolder: false,
+      });
+    }
+
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
   return objects;
 }
 
@@ -318,7 +433,11 @@ export async function uploadObject(
   );
 }
 
-export async function getObjectUrl(connectionId: string, bucket: string, key: string): Promise<string> {
+export async function getObjectUrl(
+  connectionId: string,
+  bucket: string,
+  key: string
+): Promise<string> {
   const { config } = getClientEntry(connectionId);
 
   const endpoint = resolveEndpoint(config);
@@ -409,23 +528,109 @@ export async function getPresignedUploadUrl(
   return getSignedUrl(client, command, { expiresIn });
 }
 
-/**
- * Build the base64url-encoded S3 config query param for the proxy.
- * This embeds S3 credentials in the URL so Image/Video components can use it directly.
- */
-function buildProxyS3CfgParam(config: S3Config): string {
-  const cfg = {
-    e: resolveEndpoint(config),
-    r: resolveRegion(config),
-    a: config.accessKeyId,
-    s: config.secretAccessKey,
-  };
-  // Base64url encode (no padding, URL-safe chars)
-  const b64 = btoa(JSON.stringify(cfg))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-  return b64;
+export async function copyObject(
+  connectionId: string,
+  bucket: string,
+  sourceKey: string,
+  destinationKey: string
+): Promise<void> {
+  const { client } = getClientEntry(connectionId);
+  const encodedSource = `${bucket}/${sourceKey.split('/').map(encodeURIComponent).join('/')}`;
+  await client.send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      Key: destinationKey,
+      CopySource: encodedSource,
+    })
+  );
+  invalidateBucketCache(connectionId, bucket);
+}
+
+export async function moveObject(
+  connectionId: string,
+  bucket: string,
+  sourceKey: string,
+  destinationKey: string
+): Promise<void> {
+  await copyObject(connectionId, bucket, sourceKey, destinationKey);
+  await deleteObjects(connectionId, bucket, [sourceKey]);
+}
+
+export async function createMultipartUpload(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  contentType?: string
+): Promise<string> {
+  const { client } = getClientEntry(connectionId);
+  const response = await client.send(
+    new CreateMultipartUploadCommand({
+      Bucket: bucket,
+      Key: key,
+      ContentType: contentType,
+    })
+  );
+  if (!response.UploadId) {
+    throw new Error('Failed to start multipart upload');
+  }
+  return response.UploadId;
+}
+
+export async function getPresignedUploadPartUrl(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  uploadId: string,
+  partNumber: number,
+  expiresIn = 3600
+): Promise<string> {
+  const { client } = getClientEntry(connectionId);
+  const command = new UploadPartCommand({
+    Bucket: bucket,
+    Key: key,
+    UploadId: uploadId,
+    PartNumber: partNumber,
+  });
+  return getSignedUrl(client, command, { expiresIn });
+}
+
+export async function completeMultipartUpload(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  uploadId: string,
+  parts: CompletedUploadPart[]
+): Promise<void> {
+  const { client } = getClientEntry(connectionId);
+  await client.send(
+    new CompleteMultipartUploadCommand({
+      Bucket: bucket,
+      Key: key,
+      UploadId: uploadId,
+      MultipartUpload: {
+        Parts: parts
+          .slice()
+          .sort((a, b) => a.partNumber - b.partNumber)
+          .map((part) => ({ PartNumber: part.partNumber, ETag: part.eTag })),
+      },
+    })
+  );
+}
+
+export async function abortMultipartUpload(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  uploadId: string
+): Promise<void> {
+  const { client } = getClientEntry(connectionId);
+  await client.send(
+    new AbortMultipartUploadCommand({
+      Bucket: bucket,
+      Key: key,
+      UploadId: uploadId,
+    })
+  );
 }
 
 /**
@@ -435,10 +640,7 @@ function buildProxyS3CfgParam(config: S3Config): string {
 function buildProxyUrl(config: S3Config, bucket: string, key: string): string {
   const base = config.proxyUrl!.replace(/\/+$/, '');
   const encodedKey = key.split('/').map(encodeURIComponent).join('/');
-  const params = new URLSearchParams();
-  if (config.proxyToken) params.set('token', config.proxyToken);
-  params.set('s3cfg', buildProxyS3CfgParam(config));
-  return `${base}/${encodeURIComponent(bucket)}/${encodedKey}?${params.toString()}`;
+  return `${base}/${encodeURIComponent(bucket)}/${encodedKey}`;
 }
 
 /**
@@ -537,17 +739,14 @@ export async function registerProxyAlias(connectionId: string): Promise<void> {
     accessKey: config.accessKeyId,
     secretKey: config.secretAccessKey,
   };
-  const resp = await fetch(
-    `${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${config.proxyToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }
-  );
+  const resp = await fetch(`${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${config.proxyToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
   if (!resp.ok) {
     const err = await resp.text();
     throw new Error(`Failed to register proxy alias: ${err}`);
@@ -561,13 +760,10 @@ export async function registerProxyAlias(connectionId: string): Promise<void> {
 export async function unregisterProxyAlias(config: S3Config): Promise<void> {
   if (!config.proxyUrl || !config.proxyAlias || !config.proxyToken) return;
   const base = config.proxyUrl.replace(/\/+$/, '');
-  await fetch(
-    `${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`,
-    {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${config.proxyToken}` },
-    }
-  ).catch(() => {}); // best-effort
+  await fetch(`${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${config.proxyToken}` },
+  }).catch(() => {}); // best-effort
 }
 
 /** Guess MIME type from file extension */
@@ -705,11 +901,7 @@ export function isCodeFile(fileName: string): boolean {
  * Delete ALL versions (including hidden delete markers) for the given keys.
  * Required for Backblaze B2 which creates hide markers instead of truly deleting.
  */
-async function _deleteAllVersions(
-  client: S3Client,
-  bucket: string,
-  keys: string[]
-): Promise<void> {
+async function _deleteAllVersions(client: S3Client, bucket: string, keys: string[]): Promise<void> {
   const toDelete: { Key: string; VersionId: string }[] = [];
 
   // Collect all versions for each key

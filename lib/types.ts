@@ -99,6 +99,7 @@ export interface TransferTask {
   connectionId: string;
   localPath?: string;
   previewPath?: string;
+  supportsPause?: boolean;
   error?: string;
   startedAt: string;
   completedAt?: string;

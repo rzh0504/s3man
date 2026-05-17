@@ -22,7 +22,8 @@ import {
   FileSpreadsheetIcon,
 } from 'lucide-react-native';
 import React from 'react';
-import { View, Image } from 'react-native';
+import { View } from 'react-native';
+import { Image } from 'expo-image';
 import { getFileExtension } from '@/lib/constants';
 import { t } from '@/lib/i18n';
 import { fadeIn, fadeOut } from '@/components/ui/fade-motion';
@@ -114,6 +115,7 @@ export const TransferItem = React.memo(function TransferItem({
   const isPaused = task.status === 'paused';
   const isCompleted = task.status === 'completed';
   const isFailed = task.status === 'failed';
+  const supportsPause = task.supportsPause === true;
 
   const progressText = React.useMemo(() => {
     if (isCompleted) {
@@ -147,9 +149,11 @@ export const TransferItem = React.memo(function TransferItem({
           <View className="flex-row items-center gap-3">
             {hasThumbnail ? (
               <Image
-                source={{ uri: thumbnailUri }}
+                source={{ uri: thumbnailUri, cacheKey: `transfer:${thumbnailUri}` }}
                 className="size-10 rounded-md"
-                resizeMode="cover"
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={0}
               />
             ) : (
               <Icon as={fileTypeInfo.icon} className={`${fileTypeInfo.color} size-6`} />
@@ -187,7 +191,7 @@ export const TransferItem = React.memo(function TransferItem({
           {/* Action buttons */}
           {(isActive || isPaused) && (
             <View className="flex-row items-center justify-end gap-2">
-              {isActive && (
+              {isActive && supportsPause && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -197,7 +201,7 @@ export const TransferItem = React.memo(function TransferItem({
                   <Text>{t('transfers.pause')}</Text>
                 </Button>
               )}
-              {isPaused && (
+              {isPaused && supportsPause && (
                 <Button
                   variant="outline"
                   size="sm"

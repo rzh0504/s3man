@@ -16,7 +16,8 @@ import {
   FileSpreadsheetIcon,
 } from 'lucide-react-native';
 import React from 'react';
-import { View, Pressable, Image } from 'react-native';
+import { View, Pressable } from 'react-native';
+import { Image } from 'expo-image';
 import type { LucideIcon } from 'lucide-react-native';
 
 type FileTypeInfo = { icon: LucideIcon; color: string };
@@ -68,6 +69,9 @@ interface ObjectItemProps {
   isSelected: boolean;
   selectionMode: boolean;
   thumbnailUrl?: string | null;
+  thumbnailCacheKey?: string | null;
+  thumbnailHeaders?: Record<string, string> | null;
+  onThumbnailError?: () => void;
   onPress: () => void;
   onToggle: () => void;
   onLongPress?: () => void;
@@ -75,10 +79,26 @@ interface ObjectItemProps {
 
 const ICON_SIZE = 24;
 const THUMB_RADIUS = 6;
+const loadedThumbnailCacheKeys = new Set<string>();
 
-function ImageThumbnail({ url }: { url: string }) {
-  const [loaded, setLoaded] = React.useState(false);
+function ImageThumbnail({
+  url,
+  cacheKey,
+  headers,
+  onError,
+}: {
+  url: string;
+  cacheKey: string;
+  headers?: Record<string, string> | null;
+  onError?: () => void;
+}) {
+  const [loaded, setLoaded] = React.useState(() => loadedThumbnailCacheKeys.has(cacheKey));
   const [error, setError] = React.useState(false);
+
+  React.useEffect(() => {
+    setLoaded(loadedThumbnailCacheKeys.has(cacheKey));
+    setError(false);
+  }, [cacheKey, url]);
 
   if (error) {
     return (
@@ -99,11 +119,19 @@ function ImageThumbnail({ url }: { url: string }) {
         />
       )}
       <Image
-        source={{ uri: url }}
+        source={{ uri: url, headers: headers ?? undefined, cacheKey }}
         style={{ width: ICON_SIZE, height: ICON_SIZE, borderRadius: THUMB_RADIUS }}
-        resizeMode="cover"
-        onLoad={() => setLoaded(true)}
-        onError={() => setError(true)}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+        transition={0}
+        onLoad={() => {
+          loadedThumbnailCacheKeys.add(cacheKey);
+          setLoaded(true);
+        }}
+        onError={() => {
+          setError(true);
+          onError?.();
+        }}
       />
     </View>
   );
@@ -122,6 +150,9 @@ export const ObjectItem = React.memo(function ObjectItem({
   isSelected,
   selectionMode,
   thumbnailUrl,
+  thumbnailCacheKey,
+  thumbnailHeaders,
+  onThumbnailError,
   onPress,
   onToggle,
   onLongPress,
@@ -147,7 +178,7 @@ export const ObjectItem = React.memo(function ObjectItem({
   }
 
   const fileTypeInfo = getFileTypeInfo(object.name);
-  const showThumbnail = isImageExt(object.name) && thumbnailUrl;
+  const showThumbnail = isImageExt(object.name) && thumbnailUrl && thumbnailCacheKey;
 
   return (
     <Pressable
@@ -155,7 +186,16 @@ export const ObjectItem = React.memo(function ObjectItem({
       onLongPress={onLongPress}
       className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
       {selectionMode && <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />}
-      {showThumbnail ? <ImageThumbnail url={thumbnailUrl} /> : <FileTypeIcon info={fileTypeInfo} />}
+      {showThumbnail ? (
+        <ImageThumbnail
+          url={thumbnailUrl}
+          cacheKey={thumbnailCacheKey}
+          headers={thumbnailHeaders}
+          onError={onThumbnailError}
+        />
+      ) : (
+        <FileTypeIcon info={fileTypeInfo} />
+      )}
       <Text className="text-foreground flex-1" numberOfLines={1}>
         {object.name}
       </Text>

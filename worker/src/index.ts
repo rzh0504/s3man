@@ -4,7 +4,7 @@
  * Two access modes:
  *
  * 1. **Inline config** (app-internal: Image/Video/fetch)
- *    AUTH_TOKEN required. S3 config via X-S3-* headers or ?s3cfg= param.
+ *    AUTH_TOKEN required. S3 config via X-S3-* headers.
  *    URL: /{bucket}/{key}
  *
  * 2. **KV alias** (clean share URLs, no auth needed)
@@ -108,6 +108,7 @@ export default {
       secretKey: s3Cfg.s,
       body: method === 'PUT' ? request.body : null,
       contentType: request.headers.get('Content-Type') || undefined,
+      range: request.headers.get('Range') || undefined,
     });
 
     const s3Request: CfAwareRequestInit = {
@@ -230,7 +231,7 @@ async function handleManagementApi(request: Request, url: URL, env: Env): Promis
 /**
  * Resolve S3 config and path from the request.
  *
- * 1. If inline config is present (X-S3-* headers or ?s3cfg=):
+ * 1. If inline config is present (X-S3-* headers):
  *    → AUTH_TOKEN required, path = /{bucket}/{key}
  *
  * 2. Otherwise try first path segment as KV alias:
@@ -241,7 +242,7 @@ async function resolveRequest(
   url: URL,
   env: Env
 ): Promise<ResolvedRequest | Response> {
-  const inlineCfg = resolveInlineS3Config(request, url);
+  const inlineCfg = resolveInlineS3Config(request);
 
   if (inlineCfg) {
     // Inline mode: requires AUTH_TOKEN
@@ -286,10 +287,10 @@ async function resolveRequest(
 }
 
 /**
- * Try to get S3 config from request headers or ?s3cfg query param.
+ * Try to get S3 config from request headers.
  * Returns null if not present.
  */
-function resolveInlineS3Config(request: Request, url: URL): S3Cfg | null {
+function resolveInlineS3Config(request: Request): S3Cfg | null {
   // Try headers first
   const endpoint = request.headers.get('X-S3-Endpoint');
   const region = request.headers.get('X-S3-Region');
@@ -297,18 +298,6 @@ function resolveInlineS3Config(request: Request, url: URL): S3Cfg | null {
   const secretKey = request.headers.get('X-S3-Secret-Key');
   if (endpoint && region && accessKey && secretKey) {
     return { e: endpoint, r: region, a: accessKey, s: secretKey };
-  }
-
-  // Fallback: ?s3cfg=<base64url JSON>
-  const cfgParam = url.searchParams.get('s3cfg');
-  if (cfgParam) {
-    try {
-      const decoded = atob(cfgParam.replace(/-/g, '+').replace(/_/g, '/'));
-      const cfg = JSON.parse(decoded) as S3Cfg;
-      if (cfg.e && cfg.r && cfg.a && cfg.s) return cfg;
-    } catch {
-      // invalid base64/json
-    }
   }
 
   return null;
@@ -362,7 +351,8 @@ function corsHeaders(): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, PUT, HEAD, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-S3-Endpoint, X-S3-Region, X-S3-Access-Key, X-S3-Secret-Key',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range, X-S3-Endpoint, X-S3-Region, X-S3-Access-Key, X-S3-Secret-Key',
+    'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified',
     'Access-Control-Max-Age': '86400',
   };
 }
@@ -377,10 +367,11 @@ interface SignParams {
   secretKey: string;
   body: ReadableStream | null;
   contentType?: string;
+  range?: string;
 }
 
 async function signRequest(params: SignParams): Promise<Record<string, string>> {
-  const { method, url, region, accessKey, secretKey, contentType } = params;
+  const { method, url, region, accessKey, secretKey, contentType, range } = params;
   const parsedUrl = new URL(url);
 
   const service = 's3';
@@ -400,6 +391,9 @@ async function signRequest(params: SignParams): Promise<Record<string, string>> 
   };
   if (contentType) {
     headers['content-type'] = contentType;
+  }
+  if (range) {
+    headers.range = range;
   }
 
   // Canonical headers (sorted)
