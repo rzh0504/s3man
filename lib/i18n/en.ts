@@ -212,6 +212,8 @@ export default {
     'Photo library access is required. Please allow it in system settings.',
   'bucket.pickMediaFailed': 'Failed to open photo library',
   'bucket.truncated': '... (truncated)',
+  'bucket.loadMore': 'Load more',
+  'bucket.loadingMore': 'Loading...',
 
   // ── File Preview ───────────────────────────────────────────────────────
   'preview.notAvailable': 'Preview not available for this file type.',

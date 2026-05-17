@@ -10,6 +10,10 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   GetBucketLocationCommand,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
   type S3ClientConfig,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -36,6 +40,16 @@ function sanitize(value: string): string {
 interface ClientEntry {
   client: S3Client;
   config: S3Config;
+}
+
+export interface ListObjectsPageResult {
+  objects: S3Object[];
+  nextContinuationToken?: string;
+}
+
+export interface CompletedUploadPart {
+  partNumber: number;
+  eTag: string;
 }
 
 const clientMap = new Map<string, ClientEntry>();
@@ -257,6 +271,54 @@ export async function listObjects(
   return objects;
 }
 
+export async function listObjectsPage(
+  connectionId: string,
+  bucket: string,
+  prefix: string = '',
+  continuationToken?: string,
+  maxKeys = 1000
+): Promise<ListObjectsPageResult> {
+  const { client } = getClientEntry(connectionId);
+  const response = await client.send(
+    new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix,
+      Delimiter: '/',
+      ContinuationToken: continuationToken,
+      MaxKeys: maxKeys,
+    })
+  );
+  const objects: S3Object[] = [];
+
+  for (const cp of response.CommonPrefixes ?? []) {
+    if (!cp.Prefix) continue;
+    const folderName = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
+    objects.push({
+      key: cp.Prefix,
+      name: folderName + '/',
+      isFolder: true,
+    });
+  }
+
+  for (const obj of response.Contents ?? []) {
+    if (!obj.Key || obj.Key === prefix) continue;
+    const fileName = obj.Key.slice(prefix.length);
+    if (!fileName) continue;
+    objects.push({
+      key: obj.Key,
+      name: fileName,
+      size: obj.Size,
+      lastModified: obj.LastModified?.toISOString(),
+      isFolder: false,
+    });
+  }
+
+  return {
+    objects,
+    nextContinuationToken: response.IsTruncated ? response.NextContinuationToken : undefined,
+  };
+}
+
 export function getCachedObjectList(
   connectionId: string,
   bucket: string,
@@ -415,23 +477,81 @@ export async function getPresignedUploadUrl(
   return getSignedUrl(client, command, { expiresIn });
 }
 
-/**
- * Build the base64url-encoded S3 config query param for the proxy.
- * This embeds S3 credentials in the URL so Image/Video components can use it directly.
- */
-function buildProxyS3CfgParam(config: S3Config): string {
-  const cfg = {
-    e: resolveEndpoint(config),
-    r: resolveRegion(config),
-    a: config.accessKeyId,
-    s: config.secretAccessKey,
-  };
-  // Base64url encode (no padding, URL-safe chars)
-  const b64 = btoa(JSON.stringify(cfg))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-  return b64;
+export async function createMultipartUpload(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  contentType?: string
+): Promise<string> {
+  const { client } = getClientEntry(connectionId);
+  const response = await client.send(
+    new CreateMultipartUploadCommand({
+      Bucket: bucket,
+      Key: key,
+      ContentType: contentType,
+    })
+  );
+  if (!response.UploadId) {
+    throw new Error('Failed to start multipart upload');
+  }
+  return response.UploadId;
+}
+
+export async function getPresignedUploadPartUrl(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  uploadId: string,
+  partNumber: number,
+  expiresIn = 3600
+): Promise<string> {
+  const { client } = getClientEntry(connectionId);
+  const command = new UploadPartCommand({
+    Bucket: bucket,
+    Key: key,
+    UploadId: uploadId,
+    PartNumber: partNumber,
+  });
+  return getSignedUrl(client, command, { expiresIn });
+}
+
+export async function completeMultipartUpload(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  uploadId: string,
+  parts: CompletedUploadPart[]
+): Promise<void> {
+  const { client } = getClientEntry(connectionId);
+  await client.send(
+    new CompleteMultipartUploadCommand({
+      Bucket: bucket,
+      Key: key,
+      UploadId: uploadId,
+      MultipartUpload: {
+        Parts: parts
+          .slice()
+          .sort((a, b) => a.partNumber - b.partNumber)
+          .map((part) => ({ PartNumber: part.partNumber, ETag: part.eTag })),
+      },
+    })
+  );
+}
+
+export async function abortMultipartUpload(
+  connectionId: string,
+  bucket: string,
+  key: string,
+  uploadId: string
+): Promise<void> {
+  const { client } = getClientEntry(connectionId);
+  await client.send(
+    new AbortMultipartUploadCommand({
+      Bucket: bucket,
+      Key: key,
+      UploadId: uploadId,
+    })
+  );
 }
 
 /**
@@ -441,10 +561,7 @@ function buildProxyS3CfgParam(config: S3Config): string {
 function buildProxyUrl(config: S3Config, bucket: string, key: string): string {
   const base = config.proxyUrl!.replace(/\/+$/, '');
   const encodedKey = key.split('/').map(encodeURIComponent).join('/');
-  const params = new URLSearchParams();
-  if (config.proxyToken) params.set('token', config.proxyToken);
-  params.set('s3cfg', buildProxyS3CfgParam(config));
-  return `${base}/${encodeURIComponent(bucket)}/${encodedKey}?${params.toString()}`;
+  return `${base}/${encodeURIComponent(bucket)}/${encodedKey}`;
 }
 
 /**

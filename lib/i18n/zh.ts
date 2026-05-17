@@ -207,6 +207,8 @@ export default {
   'bucket.mediaPermissionDenied': '没有相册访问权限，请先在系统设置中允许访问。',
   'bucket.pickMediaFailed': '打开相册失败',
   'bucket.truncated': '...（已截断）',
+  'bucket.loadMore': '加载更多',
+  'bucket.loadingMore': '加载中...',
 
   // ── 文件预览 ───────────────────────────────────────────────────────────
   'preview.notAvailable': '此文件类型不支持预览。',

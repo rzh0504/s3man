@@ -37,6 +37,8 @@ function normalizeTask(task: TransferTask): TransferTask {
   return {
     ...task,
     status: 'failed',
+    supportsPause: false,
+    error: task.error ?? 'Interrupted by app restart',
     completedAt: task.completedAt ?? new Date().toISOString(),
   };
 }

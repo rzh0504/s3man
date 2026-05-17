@@ -68,6 +68,7 @@ interface ObjectItemProps {
   isSelected: boolean;
   selectionMode: boolean;
   thumbnailUrl?: string | null;
+  thumbnailHeaders?: Record<string, string> | null;
   onPress: () => void;
   onToggle: () => void;
   onLongPress?: () => void;
@@ -76,7 +77,7 @@ interface ObjectItemProps {
 const ICON_SIZE = 24;
 const THUMB_RADIUS = 6;
 
-function ImageThumbnail({ url }: { url: string }) {
+function ImageThumbnail({ url, headers }: { url: string; headers?: Record<string, string> | null }) {
   const [loaded, setLoaded] = React.useState(false);
   const [error, setError] = React.useState(false);
 
@@ -99,7 +100,7 @@ function ImageThumbnail({ url }: { url: string }) {
         />
       )}
       <Image
-        source={{ uri: url }}
+        source={{ uri: url, headers: headers ?? undefined }}
         style={{ width: ICON_SIZE, height: ICON_SIZE, borderRadius: THUMB_RADIUS }}
         resizeMode="cover"
         onLoad={() => setLoaded(true)}
@@ -122,6 +123,7 @@ export const ObjectItem = React.memo(function ObjectItem({
   isSelected,
   selectionMode,
   thumbnailUrl,
+  thumbnailHeaders,
   onPress,
   onToggle,
   onLongPress,
@@ -155,7 +157,11 @@ export const ObjectItem = React.memo(function ObjectItem({
       onLongPress={onLongPress}
       className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
       {selectionMode && <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />}
-      {showThumbnail ? <ImageThumbnail url={thumbnailUrl} /> : <FileTypeIcon info={fileTypeInfo} />}
+      {showThumbnail ? (
+        <ImageThumbnail url={thumbnailUrl} headers={thumbnailHeaders} />
+      ) : (
+        <FileTypeIcon info={fileTypeInfo} />
+      )}
       <Text className="text-foreground flex-1" numberOfLines={1}>
         {object.name}
       </Text>

@@ -49,6 +49,7 @@ interface FilePreviewProps {
   onCopyLink?: () => void;
   object: S3Object | null;
   previewUrl: string | null;
+  previewHeaders?: Record<string, string> | null;
   textContent: string | null;
   isLoading: boolean;
 }
@@ -74,8 +75,9 @@ function formatAudioTime(seconds: number): string {
 
 // ── Video Player Sub-component ──────────────────────────────────────────
 
-function VideoPreview({ url }: { url: string }) {
-  const player = useVideoPlayer(url, (p) => {
+function VideoPreview({ url, headers }: { url: string; headers?: Record<string, string> | null }) {
+  const source = React.useMemo(() => ({ uri: url, headers: headers ?? undefined }), [headers, url]);
+  const player = useVideoPlayer(source, (p) => {
     p.loop = false;
   });
 
@@ -96,7 +98,7 @@ function VideoPreview({ url }: { url: string }) {
 
 // ── Dynamic Image Preview Sub-component ─────────────────────────────────
 
-function ImagePreview({ url }: { url: string }) {
+function ImagePreview({ url, headers }: { url: string; headers?: Record<string, string> | null }) {
   const [size, setSize] = React.useState<{ w: number; h: number } | null>(null);
 
   React.useEffect(() => {
@@ -127,7 +129,7 @@ function ImagePreview({ url }: { url: string }) {
       maximumZoomScale={5}
       minimumZoomScale={1}>
       <Image
-        source={{ uri: url }}
+        source={{ uri: url, headers: headers ?? undefined }}
         style={{ width: displaySize.width, height: displaySize.height, borderRadius: 8 }}
         resizeMode="contain"
       />
@@ -150,19 +152,21 @@ function PreviewUnavailable({ onDownload }: { onDownload: () => void }) {
 
 function AudioPreview({
   url,
+  headers,
   onDownload,
 }: {
   url: string;
+  headers?: Record<string, string> | null;
   onDownload: () => void;
 }) {
   const player = React.useMemo(() => {
-    const videoPlayer = createVideoPlayer({ uri: url });
+    const videoPlayer = createVideoPlayer({ uri: url, headers: headers ?? undefined });
     videoPlayer.loop = false;
     videoPlayer.timeUpdateEventInterval = 0.25;
     videoPlayer.showNowPlayingNotification = false;
     videoPlayer.staysActiveInBackground = false;
     return videoPlayer;
-  }, [url]);
+  }, [headers, url]);
   const { status, error } = useEvent(player, 'statusChange', {
     status: player.status,
     error: undefined,
@@ -254,6 +258,7 @@ export function FilePreview({
   onCopyLink,
   object,
   previewUrl,
+  previewHeaders,
   textContent,
   isLoading,
 }: FilePreviewProps) {
@@ -385,11 +390,11 @@ export function FilePreview({
                 </View>
               )
             ) : isImage && previewUrl ? (
-              <ImagePreview url={previewUrl} />
+              <ImagePreview url={previewUrl} headers={previewHeaders} />
             ) : isAudio && previewUrl ? (
-              <AudioPreview url={previewUrl} onDownload={onDownload} />
+              <AudioPreview url={previewUrl} headers={previewHeaders} onDownload={onDownload} />
             ) : isVideo && previewUrl ? (
-              <VideoPreview url={previewUrl} />
+              <VideoPreview url={previewUrl} headers={previewHeaders} />
             ) : isPdf && previewUrl ? (
               <View className="items-center gap-3 p-8">
                 <View className="flex-row items-center gap-2">

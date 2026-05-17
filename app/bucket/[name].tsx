@@ -134,15 +134,15 @@ function silentlyReconcileObjects(
   bucketName: string,
   prefix: string
 ): void {
-  void S3Service.listObjectsFresh(connectionId, bucketName, prefix)
-    .then((freshObjects) => {
+  void S3Service.listObjectsPage(connectionId, bucketName, prefix)
+    .then((page) => {
       const state = useObjectStore.getState();
       if (
         state.currentConnectionId === connectionId &&
         state.currentBucket === bucketName &&
         state.currentPrefix === prefix
       ) {
-        state.setObjects(freshObjects);
+        state.setObjects(page.objects);
       }
     })
     .catch(() => {
@@ -327,6 +327,8 @@ export default function ObjectBrowserScreen() {
   const downloadDirectoryUri = useSettingsStore((s) => s.downloadDirectoryUri);
   const downloadDirectoryName = useSettingsStore((s) => s.downloadDirectoryName);
   const loadRequestIdRef = React.useRef(0);
+  const [nextContinuationToken, setNextContinuationToken] = React.useState<string | undefined>();
+  const [isLoadingMore, setIsLoadingMore] = React.useState(false);
 
   const showSystemToast = React.useCallback(
     (message: string) => {
@@ -342,6 +344,10 @@ export default function ObjectBrowserScreen() {
   const crumbs = React.useMemo(() => breadcrumbs(), [currentPrefix]);
   const selectedCount = selectedKeys.size;
   const fileCount = objects.filter((o) => !o.isFolder).length;
+  const proxyHeaders = React.useMemo(
+    () => (connectionId ? S3Service.getProxyHeaders(connectionId) : null),
+    [connectionId]
+  );
   const getUploadConfigErrorText = React.useCallback(
     (error: UploadFileNameValidationError | null) => {
       switch (error) {
@@ -396,6 +402,7 @@ export default function ObjectBrowserScreen() {
     setInitialLoaded(getHasImmediateCache(currentPrefix));
     setThumbnailUrls({});
     setVisibleImageKeys([]);
+    setNextContinuationToken(undefined);
   }, [currentPrefix, getHasImmediateCache]);
 
   const transitionToPrefix = React.useCallback(
@@ -403,6 +410,7 @@ export default function ObjectBrowserScreen() {
       setInitialLoaded(getHasImmediateCache(nextPrefix));
       setThumbnailUrls({});
       setVisibleImageKeys([]);
+      setNextContinuationToken(undefined);
       setCurrentPrefix(nextPrefix);
     },
     [getHasImmediateCache, setCurrentPrefix]
@@ -476,7 +484,7 @@ export default function ObjectBrowserScreen() {
         }
 
         try {
-          const fresh = await S3Service.listObjectsFresh(
+          const fresh = await S3Service.listObjectsPage(
             targetConnectionId,
             targetBucket,
             targetPrefix
@@ -484,7 +492,8 @@ export default function ObjectBrowserScreen() {
           if (!isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
             return;
           }
-          setObjects(fresh);
+          setObjects(fresh.objects);
+          setNextContinuationToken(fresh.nextContinuationToken);
         } catch (error: any) {
           if (
             !hasImmediateData &&
@@ -501,7 +510,7 @@ export default function ObjectBrowserScreen() {
       } else {
         setLoading(true);
         try {
-          const fresh = await S3Service.listObjectsFresh(
+          const fresh = await S3Service.listObjectsPage(
             targetConnectionId,
             targetBucket,
             targetPrefix
@@ -509,7 +518,8 @@ export default function ObjectBrowserScreen() {
           if (!isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
             return;
           }
-          setObjects(fresh);
+          setObjects(fresh.objects);
+          setNextContinuationToken(fresh.nextContinuationToken);
         } catch (error: any) {
           if (isLoadRequestActive(requestId, targetConnectionId, targetBucket, targetPrefix)) {
             console.error('Failed to load objects:', error);
@@ -539,6 +549,42 @@ export default function ObjectBrowserScreen() {
   React.useEffect(() => {
     loadObjects();
   }, [loadObjects]);
+
+  const loadMoreObjects = React.useCallback(async () => {
+    if (!bucketName || !connectionId || !nextContinuationToken || isLoadingMore) return;
+    const targetConnectionId = connectionId;
+    const targetBucket = bucketName;
+    const targetPrefix = currentPrefix;
+    setIsLoadingMore(true);
+
+    try {
+      const page = await S3Service.listObjectsPage(
+        targetConnectionId,
+        targetBucket,
+        targetPrefix,
+        nextContinuationToken
+      );
+      const state = useObjectStore.getState();
+      if (
+        state.currentConnectionId !== targetConnectionId ||
+        state.currentBucket !== targetBucket ||
+        state.currentPrefix !== targetPrefix
+      ) {
+        return;
+      }
+      const existingKeys = new Set(state.objects.map((item) => item.key));
+      const merged = [
+        ...state.objects,
+        ...page.objects.filter((item) => !existingKeys.has(item.key)),
+      ];
+      setObjects(merged);
+      setNextContinuationToken(page.nextContinuationToken);
+    } catch (error) {
+      console.error('Failed to load more objects:', error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [bucketName, connectionId, currentPrefix, isLoadingMore, nextContinuationToken, setObjects]);
 
   const onViewableItemsChanged = React.useCallback(
     ({ viewableItems }: { viewableItems: Array<ViewToken> }) => {
@@ -726,7 +772,7 @@ export default function ObjectBrowserScreen() {
           setPreviewUrl(url);
         } else if (S3Service.isPdfFile(obj.name)) {
           // PDF: store the URL so preview can offer "open in browser"
-          setPreviewUrl(url);
+          setPreviewUrl(await S3Service.getShareUrl(connectionId, bucketName, obj.key));
         } else if (S3Service.isCodeFile(obj.name)) {
           // Fetch only the preview slice so large files do not get fully loaded into memory.
           const headers = S3Service.getProxyHeaders(connectionId) || {};
@@ -1222,6 +1268,7 @@ export default function ObjectBrowserScreen() {
         isSelected={selectedKeys.has(item.key)}
         selectionMode={selectionMode}
         thumbnailUrl={thumbnailUrls[item.key]}
+        thumbnailHeaders={proxyHeaders}
         onPress={() => handleFilePress(item)}
         onToggle={() => toggleSelection(item.key)}
         onLongPress={
@@ -1233,6 +1280,7 @@ export default function ObjectBrowserScreen() {
       selectedKeys,
       selectionMode,
       thumbnailUrls,
+      proxyHeaders,
       handleFilePress,
       toggleSelection,
       handleFolderLongPress,
@@ -1342,6 +1390,20 @@ export default function ObjectBrowserScreen() {
                 />
               }
               contentContainerClassName="pb-24"
+              ListFooterComponent={
+                nextContinuationToken ? (
+                  <View className="px-4 py-4">
+                    <Button
+                      variant="outline"
+                      onPress={() => void loadMoreObjects()}
+                      disabled={isLoadingMore}
+                      className="flex-row items-center justify-center gap-2">
+                      {isLoadingMore ? <ActivityIndicator size="small" /> : null}
+                      <Text>{isLoadingMore ? t('bucket.loadingMore') : t('bucket.loadMore')}</Text>
+                    </Button>
+                  </View>
+                ) : null
+              }
               ListEmptyComponent={
                 <EmptyState
                   icon={FolderIcon}
@@ -1502,6 +1564,7 @@ export default function ObjectBrowserScreen() {
         onCopyLink={handlePreviewCopyLink}
         object={previewObject}
         previewUrl={previewUrl}
+        previewHeaders={proxyHeaders}
         textContent={previewText}
         isLoading={previewLoading}
       />

@@ -541,11 +541,11 @@ export const useObjectStore = create<ObjectState>((set, get) => ({
 
     for (const entry of recentRootEntries) {
       try {
-        const fresh = await S3Service.listObjectsFresh(entry.connectionId, entry.bucket, entry.prefix);
+        const fresh = await S3Service.listObjectsPage(entry.connectionId, entry.bucket, entry.prefix);
         const cachedAt = new Date().toISOString();
         const cacheKey = _buildPrefixCacheKey(entry.connectionId, entry.bucket, entry.prefix);
         const prefixCache = new Map(get()._prefixCache);
-        prefixCache.set(cacheKey, fresh);
+        prefixCache.set(cacheKey, fresh.objects);
         set({ _prefixCache: prefixCache });
 
         await _upsertSnapshot({
@@ -553,8 +553,8 @@ export const useObjectStore = create<ObjectState>((set, get) => ({
           bucket: entry.bucket,
           prefix: entry.prefix,
           cachedAt,
-          itemCount: fresh.length,
-          objects: fresh,
+          itemCount: fresh.objects.length,
+          objects: fresh.objects,
         });
       } catch {}
     }
