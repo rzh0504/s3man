@@ -128,6 +128,9 @@ importers:
       expo-haptics:
         specifier: ~55.0.14
         version: 55.0.14(expo@55.0.23)
+      expo-image:
+        specifier: ~55.0.10
+        version: 55.0.10(expo@55.0.23)(react-native-web@0.21.2(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
       expo-image-manipulator:
         specifier: ~55.0.16
         version: 55.0.16(expo@55.0.23)

@@ -8,6 +8,7 @@ import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import { useConnectionStore } from '@/lib/stores/connection-store';
 import { useSettingsStore } from '@/lib/stores/settings-store';
+import type { TransferConcurrency } from '@/lib/stores/settings-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
 import { formatDownloadDirectoryLabel, getDownloadDirectoryNameFromUri } from '@/lib/download-directory';
 import { useT } from '@/lib/i18n';
@@ -39,11 +40,41 @@ import { Uniwind, useUniwind } from 'uniwind';
 import { useRouter } from 'expo-router';
 
 const TRANSFER_HISTORY_OPTIONS = [1, 3, 7] as const;
+const TRANSFER_CONCURRENCY_OPTIONS = [1, 2, 3] as const;
 const TRANSFER_HISTORY_LABELS: Record<(typeof TRANSFER_HISTORY_OPTIONS)[number], TranslationKey> = {
   1: 'settings.transferHistory1d',
   3: 'settings.transferHistory3d',
   7: 'settings.transferHistory7d',
 };
+
+function SettingsRow({
+  label,
+  children,
+  onPress,
+}: {
+  label: string;
+  children?: React.ReactNode;
+  onPress?: () => void;
+}) {
+  const content = (
+    <View className="flex-row items-center gap-3 px-4 py-3.5">
+      <View className="min-w-0 flex-1">
+        <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
+          {label}
+        </Text>
+      </View>
+      {children ? <View className="shrink-0 flex-row items-center gap-2">{children}</View> : null}
+    </View>
+  );
+
+  if (!onPress) return content;
+
+  return (
+    <Pressable onPress={onPress} className="active:bg-accent">
+      {content}
+    </Pressable>
+  );
+}
 
 export default function ConfigScreen() {
   const insets = useSafeAreaInsets();
@@ -59,6 +90,8 @@ export default function ConfigScreen() {
     setLanguage,
     transferHistoryDays,
     setTransferHistoryDays,
+    transferConcurrency,
+    setTransferConcurrency,
     downloadDirectoryUri,
     downloadDirectoryName,
     setDownloadDirectory,
@@ -91,6 +124,13 @@ export default function ConfigScreen() {
       pruneTasks(value);
     },
     [pruneTasks, setTransferHistoryDays]
+  );
+
+  const handleTransferConcurrencyChange = React.useCallback(
+    (value: TransferConcurrency) => {
+      setTransferConcurrency(value);
+    },
+    [setTransferConcurrency]
   );
 
   const downloadDirectoryLabel = React.useMemo(() => {
@@ -273,6 +313,36 @@ export default function ConfigScreen() {
 
             <Separator />
 
+            <View className="gap-3 px-4 py-3.5">
+              <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
+                {t('settings.transferConcurrency')}
+              </Text>
+              <View className="bg-muted flex-row gap-1 rounded-lg p-1">
+                {TRANSFER_CONCURRENCY_OPTIONS.map((option) => {
+                  const isActive = transferConcurrency === option;
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => handleTransferConcurrencyChange(option)}
+                      className={`flex-1 items-center justify-center rounded-md px-2.5 py-1.5 ${
+                        isActive
+                          ? 'bg-background border border-transparent shadow-sm shadow-black/5 dark:border-foreground/10 dark:bg-input/30'
+                          : ''
+                      }`}>
+                      <Text
+                        className={`text-xs font-medium ${
+                          isActive ? 'text-foreground' : 'text-muted-foreground'
+                        }`}>
+                        {t('settings.transferConcurrencyCount', { count: option })}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <Separator />
+
             {/* Download Directory */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">
               <View className="min-w-0 flex-1">
@@ -309,14 +379,7 @@ export default function ConfigScreen() {
 
             <Separator />
 
-            {/* Language */}
-            <View className="flex-row items-center gap-3 px-4 py-3.5">
-              <View className="min-w-0 flex-1">
-                <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
-                  {t('settings.language')}
-                </Text>
-              </View>
-              <View className="flex-row items-center gap-2">
+            <SettingsRow label={t('settings.language')}>
                 <Text className="text-muted-foreground text-sm">
                   {language === 'zh' ? t('settings.languageZh') : t('settings.languageEn')}
                 </Text>
@@ -327,16 +390,13 @@ export default function ConfigScreen() {
                   accessibilityLabel={t('settings.language')}>
                   <Icon as={LanguagesIcon} className="text-muted-foreground size-5" />
                 </Pressable>
-              </View>
-            </View>
+            </SettingsRow>
 
             <Separator />
 
-            {/* About */}
-            <View className="flex-row items-center gap-3 px-4 py-3.5">
-              <Text className="text-foreground flex-1 text-sm font-medium">{t('settings.about')}</Text>
+            <SettingsRow label={t('settings.about')}>
               <Text className="text-muted-foreground text-sm">v{appVersion}</Text>
-            </View>
+            </SettingsRow>
           </View>
         </NativeOnlyAnimatedView>
       </ScrollView>

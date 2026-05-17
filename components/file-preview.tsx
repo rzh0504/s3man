@@ -22,12 +22,13 @@ import {
   View,
   Modal,
   Pressable,
-  Image,
   ScrollView,
   Dimensions,
   Platform,
   ActivityIndicator,
+  Image as RNImage,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createVideoPlayer, useVideoPlayer, VideoView } from 'expo-video';
@@ -102,7 +103,7 @@ function ImagePreview({ url, headers }: { url: string; headers?: Record<string, 
   const [size, setSize] = React.useState<{ w: number; h: number } | null>(null);
 
   React.useEffect(() => {
-    Image.getSize(
+    RNImage.getSize(
       url,
       (w, h) => setSize({ w, h }),
       () => setSize({ w: MAX_PREVIEW_WIDTH, h: MAX_PREVIEW_WIDTH })
@@ -131,7 +132,8 @@ function ImagePreview({ url, headers }: { url: string; headers?: Record<string, 
       <Image
         source={{ uri: url, headers: headers ?? undefined }}
         style={{ width: displaySize.width, height: displaySize.height, borderRadius: 8 }}
-        resizeMode="contain"
+        contentFit="contain"
+        cachePolicy="disk"
       />
     </ScrollView>
   );

@@ -16,7 +16,8 @@ import {
   FileSpreadsheetIcon,
 } from 'lucide-react-native';
 import React from 'react';
-import { View, Pressable, Image } from 'react-native';
+import { View, Pressable } from 'react-native';
+import { Image } from 'expo-image';
 import type { LucideIcon } from 'lucide-react-native';
 
 type FileTypeInfo = { icon: LucideIcon; color: string };
@@ -102,7 +103,8 @@ function ImageThumbnail({ url, headers }: { url: string; headers?: Record<string
       <Image
         source={{ uri: url, headers: headers ?? undefined }}
         style={{ width: ICON_SIZE, height: ICON_SIZE, borderRadius: THUMB_RADIUS }}
-        resizeMode="cover"
+        contentFit="cover"
+        cachePolicy="disk"
         onLoad={() => setLoaded(true)}
         onError={() => setError(true)}
       />

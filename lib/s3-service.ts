@@ -14,6 +14,7 @@ import {
   UploadPartCommand,
   CompleteMultipartUploadCommand,
   AbortMultipartUploadCommand,
+  CopyObjectCommand,
   type S3ClientConfig,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -475,6 +476,34 @@ export async function getPresignedUploadUrl(
     ContentType: contentType,
   });
   return getSignedUrl(client, command, { expiresIn });
+}
+
+export async function copyObject(
+  connectionId: string,
+  bucket: string,
+  sourceKey: string,
+  destinationKey: string
+): Promise<void> {
+  const { client } = getClientEntry(connectionId);
+  const encodedSource = `${bucket}/${sourceKey.split('/').map(encodeURIComponent).join('/')}`;
+  await client.send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      Key: destinationKey,
+      CopySource: encodedSource,
+    })
+  );
+  invalidateBucketCache(connectionId, bucket);
+}
+
+export async function moveObject(
+  connectionId: string,
+  bucket: string,
+  sourceKey: string,
+  destinationKey: string
+): Promise<void> {
+  await copyObject(connectionId, bucket, sourceKey, destinationKey);
+  await deleteObjects(connectionId, bucket, [sourceKey]);
 }
 
 export async function createMultipartUpload(

@@ -116,13 +116,7 @@ Cloudflare 会自动配置 DNS 和 SSL 证书。
 
 ### 模式 1：App 内部请求（需鉴权）
 
-用于 Image/Video 组件预览和 fetch 下载，凭证随请求传递：
-
-```
-GET /{bucket}/{key}?token=AUTH_TOKEN&s3cfg=<base64url>
-```
-
-或通过请求头传递：
+用于 Image/Video 组件预览和 fetch 下载，凭证通过请求头传递，避免出现在 URL、日志或分享记录中：
 
 ```
 GET /{bucket}/{key}
