@@ -10,11 +10,15 @@ import { useConnectionStore } from '@/lib/stores/connection-store';
 import { useSettingsStore } from '@/lib/stores/settings-store';
 import type { TransferConcurrency } from '@/lib/stores/settings-store';
 import { useTransferStore } from '@/lib/stores/transfer-store';
-import { formatDownloadDirectoryLabel, getDownloadDirectoryNameFromUri } from '@/lib/download-directory';
+import {
+  formatDownloadDirectoryLabel,
+  getDownloadDirectoryNameFromUri,
+} from '@/lib/download-directory';
 import { useT } from '@/lib/i18n';
 import type { TranslationKey } from '@/lib/i18n';
 import {
   ChevronRightIcon,
+  ChevronDownIcon,
   SettingsIcon,
   SunIcon,
   MoonIcon,
@@ -46,6 +50,53 @@ const TRANSFER_HISTORY_LABELS: Record<(typeof TRANSFER_HISTORY_OPTIONS)[number],
   3: 'settings.transferHistory3d',
   7: 'settings.transferHistory7d',
 };
+
+type SettingsDropdownOption<T extends number> = {
+  value: T;
+  label: string;
+};
+
+function SettingsDropdown<T extends number>({
+  value,
+  options,
+  open,
+  width,
+  onToggle,
+  onSelect,
+}: {
+  value: string;
+  options: SettingsDropdownOption<T>[];
+  open: boolean;
+  width: number;
+  onToggle: () => void;
+  onSelect: (value: T) => void;
+}) {
+  return (
+    <View className="relative" style={{ zIndex: open ? 50 : 1 }}>
+      <Pressable
+        onPress={onToggle}
+        className="border-input bg-background active:bg-accent flex-row items-center justify-between gap-2 rounded-lg border px-3 py-2"
+        style={{ width }}>
+        <Text className="text-foreground text-sm font-medium">{value}</Text>
+        <Icon as={ChevronDownIcon} className="text-muted-foreground size-4" />
+      </Pressable>
+      {open ? (
+        <View
+          className="border-border bg-popover absolute top-11 right-0 overflow-hidden rounded-lg border shadow-lg shadow-black/10"
+          style={{ width, zIndex: 100 }}>
+          {options.map((option) => (
+            <Pressable
+              key={option.value}
+              onPress={() => onSelect(option.value)}
+              className="active:bg-accent px-3 py-2.5">
+              <Text className="text-popover-foreground text-sm font-medium">{option.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 function SettingsRow({
   label,
@@ -99,6 +150,7 @@ export default function ConfigScreen() {
 
   const connectedCount = connections.filter((c) => c.status === 'connected').length;
   const appVersion = Constants.expoConfig?.version ?? '1.0.6';
+  const [openDropdown, setOpenDropdown] = React.useState<'history' | 'concurrency' | null>(null);
 
   const themeScale = useSharedValue(1);
 
@@ -122,6 +174,7 @@ export default function ConfigScreen() {
     (value: (typeof TRANSFER_HISTORY_OPTIONS)[number]) => {
       setTransferHistoryDays(value);
       pruneTasks(value);
+      setOpenDropdown(null);
     },
     [pruneTasks, setTransferHistoryDays]
   );
@@ -129,8 +182,27 @@ export default function ConfigScreen() {
   const handleTransferConcurrencyChange = React.useCallback(
     (value: TransferConcurrency) => {
       setTransferConcurrency(value);
+      setOpenDropdown(null);
     },
     [setTransferConcurrency]
+  );
+
+  const transferHistoryDropdownOptions = React.useMemo(
+    () =>
+      TRANSFER_HISTORY_OPTIONS.map((value) => ({
+        value,
+        label: t(TRANSFER_HISTORY_LABELS[value]),
+      })),
+    [t]
+  );
+
+  const transferConcurrencyDropdownOptions = React.useMemo(
+    () =>
+      TRANSFER_CONCURRENCY_OPTIONS.map((value) => ({
+        value,
+        label: t('settings.transferConcurrencyCount', { count: value }),
+      })),
+    [t]
   );
 
   const downloadDirectoryLabel = React.useMemo(() => {
@@ -283,62 +355,42 @@ export default function ConfigScreen() {
             <Separator />
 
             {/* Transfer History */}
-            <View className="gap-3 px-4 py-3.5">
-              <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
+            <View
+              className="flex-row items-center gap-3 px-4 py-3.5"
+              style={{ zIndex: openDropdown === 'history' ? 20 : 2 }}>
+              <Text className="text-foreground flex-1 text-sm font-medium" numberOfLines={1}>
                 {t('settings.transferHistoryDays')}
               </Text>
-              <View className="bg-muted flex-row gap-1 rounded-lg p-1">
-                {TRANSFER_HISTORY_OPTIONS.map((option) => {
-                  const isActive = transferHistoryDays === option;
-                  return (
-                    <Pressable
-                      key={option}
-                      onPress={() => handleTransferHistoryDaysChange(option)}
-                      className={`flex-1 items-center justify-center rounded-md px-2.5 py-1.5 ${
-                        isActive
-                          ? 'bg-background border border-transparent shadow-sm shadow-black/5 dark:border-foreground/10 dark:bg-input/30'
-                          : ''
-                      }`}>
-                      <Text
-                        className={`text-xs font-medium ${
-                          isActive ? 'text-foreground' : 'text-muted-foreground'
-                        }`}>
-                        {t(TRANSFER_HISTORY_LABELS[option])}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              <SettingsDropdown
+                value={t(TRANSFER_HISTORY_LABELS[transferHistoryDays])}
+                options={transferHistoryDropdownOptions}
+                open={openDropdown === 'history'}
+                width={96}
+                onToggle={() =>
+                  setOpenDropdown((current) => (current === 'history' ? null : 'history'))
+                }
+                onSelect={handleTransferHistoryDaysChange}
+              />
             </View>
 
             <Separator />
 
-            <View className="gap-3 px-4 py-3.5">
-              <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
+            <View
+              className="flex-row items-center gap-3 px-4 py-3.5"
+              style={{ zIndex: openDropdown === 'concurrency' ? 20 : 1 }}>
+              <Text className="text-foreground flex-1 text-sm font-medium" numberOfLines={1}>
                 {t('settings.transferConcurrency')}
               </Text>
-              <View className="bg-muted flex-row gap-1 rounded-lg p-1">
-                {TRANSFER_CONCURRENCY_OPTIONS.map((option) => {
-                  const isActive = transferConcurrency === option;
-                  return (
-                    <Pressable
-                      key={option}
-                      onPress={() => handleTransferConcurrencyChange(option)}
-                      className={`flex-1 items-center justify-center rounded-md px-2.5 py-1.5 ${
-                        isActive
-                          ? 'bg-background border border-transparent shadow-sm shadow-black/5 dark:border-foreground/10 dark:bg-input/30'
-                          : ''
-                      }`}>
-                      <Text
-                        className={`text-xs font-medium ${
-                          isActive ? 'text-foreground' : 'text-muted-foreground'
-                        }`}>
-                        {t('settings.transferConcurrencyCount', { count: option })}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              <SettingsDropdown
+                value={t('settings.transferConcurrencyCount', { count: transferConcurrency })}
+                options={transferConcurrencyDropdownOptions}
+                open={openDropdown === 'concurrency'}
+                width={80}
+                onToggle={() =>
+                  setOpenDropdown((current) => (current === 'concurrency' ? null : 'concurrency'))
+                }
+                onSelect={handleTransferConcurrencyChange}
+              />
             </View>
 
             <Separator />
@@ -380,16 +432,16 @@ export default function ConfigScreen() {
             <Separator />
 
             <SettingsRow label={t('settings.language')}>
-                <Text className="text-muted-foreground text-sm">
-                  {language === 'zh' ? t('settings.languageZh') : t('settings.languageEn')}
-                </Text>
-                <Pressable
-                  onPress={toggleLanguage}
-                  className="active:bg-accent -my-2 -mr-1 rounded-full p-2"
-                  accessibilityRole="button"
-                  accessibilityLabel={t('settings.language')}>
-                  <Icon as={LanguagesIcon} className="text-muted-foreground size-5" />
-                </Pressable>
+              <Text className="text-muted-foreground text-sm">
+                {language === 'zh' ? t('settings.languageZh') : t('settings.languageEn')}
+              </Text>
+              <Pressable
+                onPress={toggleLanguage}
+                className="active:bg-accent -my-2 -mr-1 rounded-full p-2"
+                accessibilityRole="button"
+                accessibilityLabel={t('settings.language')}>
+                <Icon as={LanguagesIcon} className="text-muted-foreground size-5" />
+              </Pressable>
             </SettingsRow>
 
             <Separator />
