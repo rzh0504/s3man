@@ -111,9 +111,11 @@ const TEXT_PREVIEW_MAX_BYTES = 102400;
 type ObjectSortMode = 'name' | 'date' | 'size';
 type ObjectTypeFilter = 'all' | 'images' | 'media' | 'docs' | 'other';
 type ObjectAction = 'rename' | 'copy' | 'move';
+type ThumbnailUrlEntry = { url: string; createdAt: number };
 
 const OBJECT_TYPE_FILTERS: ObjectTypeFilter[] = ['all', 'images', 'media', 'docs', 'other'];
 const OBJECT_SORT_MODES: ObjectSortMode[] = ['name', 'date', 'size'];
+const THUMBNAIL_URL_TTL_MS = 25 * 60 * 1000;
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -160,6 +162,10 @@ function getEmptyObjectTitleKey(filter: ObjectTypeFilter, hasSearchQuery: boolea
   if (filter === 'docs') return 'bucket.emptyDocs';
   if (filter === 'other') return 'bucket.emptyOther';
   return 'bucket.emptyFiles';
+}
+
+function getThumbnailCacheKey(connectionId: string, bucket: string, object: S3Object): string {
+  return [connectionId, bucket, object.key, object.size ?? '', object.lastModified ?? ''].join(':');
 }
 
 function compareObjectsBySort(a: S3Object, b: S3Object, sortMode: ObjectSortMode): number {
@@ -407,7 +413,7 @@ export default function ObjectBrowserScreen() {
   const [isDeletingFolder, setIsDeletingFolder] = React.useState(false);
 
   // Thumbnail presigned URLs cache
-  const [thumbnailUrls, setThumbnailUrls] = React.useState<Record<string, string>>({});
+  const [thumbnailUrls, setThumbnailUrls] = React.useState<Record<string, ThumbnailUrlEntry>>({});
   const [visibleImageKeys, setVisibleImageKeys] = React.useState<string[]>([]);
   const showThumbnails = useSettingsStore((s) => s.showThumbnails);
   const downloadDirectoryUri = useSettingsStore((s) => s.downloadDirectoryUri);
@@ -513,7 +519,6 @@ export default function ObjectBrowserScreen() {
 
   React.useEffect(() => {
     setInitialLoaded(getHasImmediateCache(currentPrefix));
-    setThumbnailUrls({});
     setVisibleImageKeys([]);
     setNextContinuationToken(undefined);
   }, [currentPrefix, getHasImmediateCache]);
@@ -521,7 +526,6 @@ export default function ObjectBrowserScreen() {
   const transitionToPrefix = React.useCallback(
     (nextPrefix: string) => {
       setInitialLoaded(getHasImmediateCache(nextPrefix));
-      setThumbnailUrls({});
       setVisibleImageKeys([]);
       setNextContinuationToken(undefined);
       setCurrentPrefix(nextPrefix);
@@ -734,7 +738,11 @@ export default function ObjectBrowserScreen() {
     }
     let cancelled = false;
 
-    const pendingKeys = visibleImageKeys.filter((key) => !thumbnailUrls[key]);
+    const now = Date.now();
+    const pendingKeys = visibleImageKeys.filter((key) => {
+      const entry = thumbnailUrls[key];
+      return !entry || now - entry.createdAt > THUMBNAIL_URL_TTL_MS;
+    });
     if (pendingKeys.length === 0) {
       return;
     }
@@ -742,7 +750,14 @@ export default function ObjectBrowserScreen() {
     S3Service.batchGetFileUrls(connectionId, bucketName, pendingKeys.slice(0, 12), 1800)
       .then((urls) => {
         if (!cancelled) {
-          setThumbnailUrls((prev) => ({ ...prev, ...urls }));
+          const createdAt = Date.now();
+          setThumbnailUrls((prev) => {
+            const next = { ...prev };
+            for (const [key, url] of Object.entries(urls)) {
+              next[key] = { url, createdAt };
+            }
+            return next;
+          });
         }
       })
       .catch(() => {
@@ -1469,7 +1484,12 @@ export default function ObjectBrowserScreen() {
         object={item}
         isSelected={selectedKeys.has(item.key)}
         selectionMode={selectionMode}
-        thumbnailUrl={thumbnailUrls[item.key]}
+        thumbnailUrl={thumbnailUrls[item.key]?.url}
+        thumbnailCacheKey={
+          connectionId && bucketName && S3Service.isImageFile(item.name)
+            ? getThumbnailCacheKey(connectionId, bucketName, item)
+            : null
+        }
         thumbnailHeaders={proxyHeaders}
         onPress={() => handleFilePress(item)}
         onToggle={() => toggleSelection(item.key)}
@@ -1482,6 +1502,8 @@ export default function ObjectBrowserScreen() {
       selectedKeys,
       selectionMode,
       thumbnailUrls,
+      connectionId,
+      bucketName,
       proxyHeaders,
       handleFilePress,
       toggleSelection,

@@ -69,6 +69,7 @@ interface ObjectItemProps {
   isSelected: boolean;
   selectionMode: boolean;
   thumbnailUrl?: string | null;
+  thumbnailCacheKey?: string | null;
   thumbnailHeaders?: Record<string, string> | null;
   onPress: () => void;
   onToggle: () => void;
@@ -77,10 +78,24 @@ interface ObjectItemProps {
 
 const ICON_SIZE = 24;
 const THUMB_RADIUS = 6;
+const loadedThumbnailCacheKeys = new Set<string>();
 
-function ImageThumbnail({ url, headers }: { url: string; headers?: Record<string, string> | null }) {
-  const [loaded, setLoaded] = React.useState(false);
+function ImageThumbnail({
+  url,
+  cacheKey,
+  headers,
+}: {
+  url: string;
+  cacheKey: string;
+  headers?: Record<string, string> | null;
+}) {
+  const [loaded, setLoaded] = React.useState(() => loadedThumbnailCacheKeys.has(cacheKey));
   const [error, setError] = React.useState(false);
+
+  React.useEffect(() => {
+    setLoaded(loadedThumbnailCacheKeys.has(cacheKey));
+    setError(false);
+  }, [cacheKey, url]);
 
   if (error) {
     return (
@@ -101,11 +116,15 @@ function ImageThumbnail({ url, headers }: { url: string; headers?: Record<string
         />
       )}
       <Image
-        source={{ uri: url, headers: headers ?? undefined }}
+        source={{ uri: url, headers: headers ?? undefined, cacheKey }}
         style={{ width: ICON_SIZE, height: ICON_SIZE, borderRadius: THUMB_RADIUS }}
         contentFit="cover"
-        cachePolicy="disk"
-        onLoad={() => setLoaded(true)}
+        cachePolicy="memory-disk"
+        transition={0}
+        onLoad={() => {
+          loadedThumbnailCacheKeys.add(cacheKey);
+          setLoaded(true);
+        }}
         onError={() => setError(true)}
       />
     </View>
@@ -125,6 +144,7 @@ export const ObjectItem = React.memo(function ObjectItem({
   isSelected,
   selectionMode,
   thumbnailUrl,
+  thumbnailCacheKey,
   thumbnailHeaders,
   onPress,
   onToggle,
@@ -151,7 +171,7 @@ export const ObjectItem = React.memo(function ObjectItem({
   }
 
   const fileTypeInfo = getFileTypeInfo(object.name);
-  const showThumbnail = isImageExt(object.name) && thumbnailUrl;
+  const showThumbnail = isImageExt(object.name) && thumbnailUrl && thumbnailCacheKey;
 
   return (
     <Pressable
@@ -160,7 +180,11 @@ export const ObjectItem = React.memo(function ObjectItem({
       className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
       {selectionMode && <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />}
       {showThumbnail ? (
-        <ImageThumbnail url={thumbnailUrl} headers={thumbnailHeaders} />
+        <ImageThumbnail
+          url={thumbnailUrl}
+          cacheKey={thumbnailCacheKey}
+          headers={thumbnailHeaders}
+        />
       ) : (
         <FileTypeIcon info={fileTypeInfo} />
       )}
