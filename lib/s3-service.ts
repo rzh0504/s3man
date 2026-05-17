@@ -78,7 +78,8 @@ export function createClientForConnection(connectionId: string, config: S3Config
       accessKeyId: sanitize(config.accessKeyId),
       secretAccessKey: sanitize(config.secretAccessKey),
     },
-    forcePathStyle: config.forcePathStyle ?? (config.provider === 'backblaze-b2' || config.provider === 'custom'),
+    forcePathStyle:
+      config.forcePathStyle ?? (config.provider === 'backblaze-b2' || config.provider === 'custom'),
   };
 
   if (endpoint) {
@@ -125,7 +126,8 @@ export async function discoverBuckets(config: S3Config): Promise<string[]> {
       accessKeyId: sanitize(config.accessKeyId),
       secretAccessKey: sanitize(config.secretAccessKey),
     },
-    forcePathStyle: config.forcePathStyle ?? (config.provider === 'backblaze-b2' || config.provider === 'custom'),
+    forcePathStyle:
+      config.forcePathStyle ?? (config.provider === 'backblaze-b2' || config.provider === 'custom'),
   };
   if (endpoint) {
     clientConfig.endpoint = endpoint;
@@ -184,7 +186,11 @@ export async function listBuckets(connectionId: string): Promise<BucketInfo[]> {
   return buckets;
 }
 
-export async function createBucket(connectionId: string, name: string, region?: string): Promise<void> {
+export async function createBucket(
+  connectionId: string,
+  name: string,
+  region?: string
+): Promise<void> {
   const { client, config } = getClientEntry(connectionId);
 
   const params: any = { Bucket: name };
@@ -320,6 +326,46 @@ export async function listObjectsPage(
   };
 }
 
+export async function searchObjects(
+  connectionId: string,
+  bucket: string,
+  query: string
+): Promise<S3Object[]> {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return [];
+
+  const { client } = getClientEntry(connectionId);
+  const objects: S3Object[] = [];
+  let continuationToken: string | undefined;
+
+  do {
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000,
+      })
+    );
+
+    for (const obj of response.Contents ?? []) {
+      if (!obj.Key || obj.Key.endsWith('/')) continue;
+      const key = obj.Key;
+      if (!key.toLowerCase().includes(normalizedQuery)) continue;
+      objects.push({
+        key,
+        name: key,
+        size: obj.Size,
+        lastModified: obj.LastModified?.toISOString(),
+        isFolder: false,
+      });
+    }
+
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return objects;
+}
+
 export function getCachedObjectList(
   connectionId: string,
   bucket: string,
@@ -387,7 +433,11 @@ export async function uploadObject(
   );
 }
 
-export async function getObjectUrl(connectionId: string, bucket: string, key: string): Promise<string> {
+export async function getObjectUrl(
+  connectionId: string,
+  bucket: string,
+  key: string
+): Promise<string> {
   const { config } = getClientEntry(connectionId);
 
   const endpoint = resolveEndpoint(config);
@@ -689,17 +739,14 @@ export async function registerProxyAlias(connectionId: string): Promise<void> {
     accessKey: config.accessKeyId,
     secretKey: config.secretAccessKey,
   };
-  const resp = await fetch(
-    `${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${config.proxyToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }
-  );
+  const resp = await fetch(`${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${config.proxyToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
   if (!resp.ok) {
     const err = await resp.text();
     throw new Error(`Failed to register proxy alias: ${err}`);
@@ -713,13 +760,10 @@ export async function registerProxyAlias(connectionId: string): Promise<void> {
 export async function unregisterProxyAlias(config: S3Config): Promise<void> {
   if (!config.proxyUrl || !config.proxyAlias || !config.proxyToken) return;
   const base = config.proxyUrl.replace(/\/+$/, '');
-  await fetch(
-    `${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`,
-    {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${config.proxyToken}` },
-    }
-  ).catch(() => {}); // best-effort
+  await fetch(`${base}/api/configs/${encodeURIComponent(config.proxyAlias)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${config.proxyToken}` },
+  }).catch(() => {}); // best-effort
 }
 
 /** Guess MIME type from file extension */
@@ -857,11 +901,7 @@ export function isCodeFile(fileName: string): boolean {
  * Delete ALL versions (including hidden delete markers) for the given keys.
  * Required for Backblaze B2 which creates hide markers instead of truly deleting.
  */
-async function _deleteAllVersions(
-  client: S3Client,
-  bucket: string,
-  keys: string[]
-): Promise<void> {
+async function _deleteAllVersions(client: S3Client, bucket: string, keys: string[]): Promise<void> {
   const toDelete: { Key: string; VersionId: string }[] = [];
 
   // Collect all versions for each key

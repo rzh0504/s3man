@@ -233,6 +233,8 @@ export default {
   'bucket.loadMore': 'Load more',
   'bucket.loadingMore': 'Loading...',
   'bucket.searchPlaceholder': 'Search files',
+  'bucket.searching': 'Searching...',
+  'bucket.searchFailed': 'Search failed',
   'bucket.filterAll': 'All',
   'bucket.filterImages': 'Images',
   'bucket.filterMedia': 'Media',

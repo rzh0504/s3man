@@ -26,7 +26,6 @@ import {
   Dimensions,
   Platform,
   ActivityIndicator,
-  Image as RNImage,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
@@ -102,14 +101,6 @@ function VideoPreview({ url, headers }: { url: string; headers?: Record<string, 
 function ImagePreview({ url, headers }: { url: string; headers?: Record<string, string> | null }) {
   const [size, setSize] = React.useState<{ w: number; h: number } | null>(null);
 
-  React.useEffect(() => {
-    RNImage.getSize(
-      url,
-      (w, h) => setSize({ w, h }),
-      () => setSize({ w: MAX_PREVIEW_WIDTH, h: MAX_PREVIEW_WIDTH })
-    );
-  }, [url]);
-
   const displaySize = React.useMemo(() => {
     if (!size) return { width: MAX_PREVIEW_WIDTH, height: MAX_PREVIEW_WIDTH };
     const aspect = size.w / size.h;
@@ -133,7 +124,9 @@ function ImagePreview({ url, headers }: { url: string; headers?: Record<string, 
         source={{ uri: url, headers: headers ?? undefined }}
         style={{ width: displaySize.width, height: displaySize.height, borderRadius: 8 }}
         contentFit="contain"
-        cachePolicy="disk"
+        cachePolicy="memory-disk"
+        transition={0}
+        onLoad={({ source }) => setSize({ w: source.width, h: source.height })}
       />
     </ScrollView>
   );
@@ -184,7 +177,10 @@ function AudioPreview({
   });
 
   const duration = player.duration > 0 ? player.duration : 0;
-  const safeCurrentTime = Math.min(currentTime ?? player.currentTime, duration || player.currentTime);
+  const safeCurrentTime = Math.min(
+    currentTime ?? player.currentTime,
+    duration || player.currentTime
+  );
   const progress = duration > 0 ? Math.min((safeCurrentTime / duration) * 100, 100) : 0;
   const isUnavailable = status === 'error';
   const isLoading = status === 'loading' || status === 'idle';

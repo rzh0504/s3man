@@ -50,9 +50,7 @@ import {
 import * as React from 'react';
 import {
   View,
-  FlatList,
   ScrollView,
-  RefreshControl,
   Pressable,
   Platform,
   Share,
@@ -62,14 +60,15 @@ import {
   ToastAndroid,
   TextInput,
   useWindowDimensions,
-  type ViewToken,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
+import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Clipboard from 'expo-clipboard';
+import { FlashList } from '@shopify/flash-list';
 import type { S3Object, TransferTask } from '@/lib/types';
 import { Progress } from '@/components/ui/progress';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
@@ -112,10 +111,13 @@ type ObjectSortMode = 'name' | 'date' | 'size';
 type ObjectTypeFilter = 'all' | 'images' | 'media' | 'docs' | 'other';
 type ObjectAction = 'rename' | 'copy' | 'move';
 type ThumbnailUrlEntry = { url: string; createdAt: number };
+type SearchResultState = { query: string; objects: S3Object[] } | null;
 
 const OBJECT_TYPE_FILTERS: ObjectTypeFilter[] = ['all', 'images', 'media', 'docs', 'other'];
 const OBJECT_SORT_MODES: ObjectSortMode[] = ['name', 'date', 'size'];
 const THUMBNAIL_URL_TTL_MS = 25 * 60 * 1000;
+const FAILED_THUMBNAIL_RETRY_MS = 10 * 60 * 1000;
+const SEARCH_BUSY_DELAY_MS = 250;
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -414,12 +416,18 @@ export default function ObjectBrowserScreen() {
 
   // Thumbnail presigned URLs cache
   const [thumbnailUrls, setThumbnailUrls] = React.useState<Record<string, ThumbnailUrlEntry>>({});
+  const [failedThumbnailKeys, setFailedThumbnailKeys] = React.useState<Record<string, number>>({});
   const [visibleImageKeys, setVisibleImageKeys] = React.useState<string[]>([]);
+  const [searchResults, setSearchResults] = React.useState<SearchResultState>(null);
+  const [isSearchingBucket, setIsSearchingBucket] = React.useState(false);
+  const [showSearchBusy, setShowSearchBusy] = React.useState(false);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState('');
   const showThumbnails = useSettingsStore((s) => s.showThumbnails);
   const downloadDirectoryUri = useSettingsStore((s) => s.downloadDirectoryUri);
   const downloadDirectoryName = useSettingsStore((s) => s.downloadDirectoryName);
   const transferConcurrency = useSettingsStore((s) => s.transferConcurrency);
   const loadRequestIdRef = React.useRef(0);
+  const searchRequestIdRef = React.useRef(0);
   const [nextContinuationToken, setNextContinuationToken] = React.useState<string | undefined>();
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
 
@@ -448,8 +456,10 @@ export default function ObjectBrowserScreen() {
     () => (connectionId ? S3Service.getProxyHeaders(connectionId) : null),
     [connectionId]
   );
-  const filteredObjects = React.useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+  const normalizedSearchQuery = searchQuery.trim();
+  const hasSearchQuery = normalizedSearchQuery.length > 0;
+  const immediateFilteredObjects = React.useMemo(() => {
+    const query = normalizedSearchQuery.toLowerCase();
     return objects
       .filter(
         (object) =>
@@ -460,13 +470,40 @@ export default function ObjectBrowserScreen() {
       .filter((object) => matchesTypeFilter(object, typeFilter))
       .slice()
       .sort((a, b) => compareObjectsBySort(a, b, sortMode));
-  }, [objects, searchQuery, sortMode, typeFilter]);
+  }, [objects, normalizedSearchQuery, sortMode, typeFilter]);
+  const filteredObjects = React.useMemo(() => {
+    if (hasSearchQuery && searchResults?.query === normalizedSearchQuery) {
+      return searchResults.objects
+        .filter((object) => matchesTypeFilter(object, typeFilter))
+        .slice()
+        .sort((a, b) => compareObjectsBySort(a, b, sortMode));
+    }
+    return immediateFilteredObjects;
+  }, [
+    hasSearchQuery,
+    immediateFilteredObjects,
+    normalizedSearchQuery,
+    searchResults,
+    sortMode,
+    typeFilter,
+  ]);
   const visibleFileCount = filteredObjects.filter((o) => !o.isFolder).length;
-  const selectedObjects = React.useMemo(
-    () => objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder),
-    [objects, selectedKeys]
+  const selectedObjects = React.useMemo(() => {
+    const byKey = new Map<string, S3Object>();
+    for (const object of objects) byKey.set(object.key, object);
+    for (const object of searchResults?.objects ?? []) byKey.set(object.key, object);
+    return Array.from(byKey.values()).filter((o) => selectedKeys.has(o.key) && !o.isFolder);
+  }, [objects, searchResults, selectedKeys]);
+  const shouldShowSearchBusy =
+    hasSearchQuery && isSearchingBucket && showSearchBusy && immediateFilteredObjects.length === 0;
+  const prewarmImageKeys = React.useMemo(
+    () =>
+      filteredObjects
+        .filter((object) => !object.isFolder && S3Service.isImageFile(object.name))
+        .slice(0, 12)
+        .map((object) => object.key),
+    [filteredObjects]
   );
-  const hasSearchQuery = searchQuery.trim().length > 0;
   const getUploadConfigErrorText = React.useCallback(
     (error: UploadFileNameValidationError | null) => {
       switch (error) {
@@ -663,6 +700,55 @@ export default function ObjectBrowserScreen() {
     loadObjects();
   }, [loadObjects]);
 
+  React.useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchQuery(normalizedSearchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [normalizedSearchQuery]);
+
+  React.useEffect(() => {
+    if (!connectionId || !bucketName || !debouncedSearchQuery) {
+      searchRequestIdRef.current += 1;
+      setSearchResults(null);
+      setIsSearchingBucket(false);
+      setShowSearchBusy(false);
+      return;
+    }
+
+    const requestId = ++searchRequestIdRef.current;
+    let cancelled = false;
+    setIsSearchingBucket(true);
+    setShowSearchBusy(false);
+
+    const busyTimer = setTimeout(() => {
+      if (!cancelled && searchRequestIdRef.current === requestId) {
+        setShowSearchBusy(true);
+      }
+    }, SEARCH_BUSY_DELAY_MS);
+
+    S3Service.searchObjects(connectionId, bucketName, debouncedSearchQuery)
+      .then((objects) => {
+        if (!cancelled && searchRequestIdRef.current === requestId) {
+          setSearchResults({ query: debouncedSearchQuery, objects });
+        }
+      })
+      .catch((error: any) => {
+        if (!cancelled && searchRequestIdRef.current === requestId) {
+          showNotice(error?.message || t('bucket.searchFailed'), true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled && searchRequestIdRef.current === requestId) {
+          setIsSearchingBucket(false);
+          setShowSearchBusy(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      clearTimeout(busyTimer);
+    };
+  }, [bucketName, connectionId, debouncedSearchQuery, showNotice, t]);
+
   const loadMoreObjects = React.useCallback(async () => {
     if (!bucketName || !connectionId || !nextContinuationToken || isLoadingMore) return;
     const targetConnectionId = connectionId;
@@ -708,7 +794,7 @@ export default function ObjectBrowserScreen() {
   ]);
 
   const onViewableItemsChanged = React.useCallback(
-    ({ viewableItems }: { viewableItems: Array<ViewToken> }) => {
+    ({ viewableItems }: { viewableItems: Array<{ item?: S3Object }> }) => {
       const nextKeys = viewableItems
         .map((token) => token.item as S3Object | undefined)
         .filter(
@@ -730,6 +816,10 @@ export default function ObjectBrowserScreen() {
     []
   );
 
+  const handleThumbnailError = React.useCallback((key: string) => {
+    setFailedThumbnailKeys((prev) => ({ ...prev, [key]: Date.now() }));
+  }, []);
+
   const viewabilityConfig = React.useRef({ itemVisiblePercentThreshold: 60 }).current;
 
   React.useEffect(() => {
@@ -739,8 +829,11 @@ export default function ObjectBrowserScreen() {
     let cancelled = false;
 
     const now = Date.now();
-    const pendingKeys = visibleImageKeys.filter((key) => {
+    const candidateKeys = Array.from(new Set([...prewarmImageKeys, ...visibleImageKeys]));
+    const pendingKeys = candidateKeys.filter((key) => {
       const entry = thumbnailUrls[key];
+      const failedAt = failedThumbnailKeys[key];
+      if (failedAt && now - failedAt < FAILED_THUMBNAIL_RETRY_MS) return false;
       return !entry || now - entry.createdAt > THUMBNAIL_URL_TTL_MS;
     });
     if (pendingKeys.length === 0) {
@@ -758,16 +851,36 @@ export default function ObjectBrowserScreen() {
             }
             return next;
           });
+          void ExpoImage.prefetch(Object.values(urls), {
+            cachePolicy: 'memory-disk',
+            headers: proxyHeaders ?? undefined,
+          });
         }
       })
       .catch(() => {
-        // Silently skip thumbnail failures
+        if (!cancelled) {
+          const failedAt = Date.now();
+          setFailedThumbnailKeys((prev) => {
+            const next = { ...prev };
+            for (const key of pendingKeys) next[key] = failedAt;
+            return next;
+          });
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [visibleImageKeys, thumbnailUrls, connectionId, bucketName, showThumbnails]);
+  }, [
+    visibleImageKeys,
+    prewarmImageKeys,
+    thumbnailUrls,
+    failedThumbnailKeys,
+    connectionId,
+    bucketName,
+    proxyHeaders,
+    showThumbnails,
+  ]);
 
   const handleFolderPress = React.useCallback(
     (folder: S3Object) => {
@@ -1074,23 +1187,21 @@ export default function ObjectBrowserScreen() {
   );
 
   const handlePull = React.useCallback(async () => {
-    const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
-    void runWithConcurrency(selected, transferConcurrency, downloadFile);
+    void runWithConcurrency(selectedObjects, transferConcurrency, downloadFile);
     setSelectionMode(false);
     clearSelection();
-  }, [objects, selectedKeys, transferConcurrency, downloadFile, clearSelection]);
+  }, [selectedObjects, transferConcurrency, downloadFile, clearSelection]);
 
   // ── Delete selected files ────────────────────────────────────────────────
   const handleDelete = React.useCallback(() => {
     if (!bucketName || !connectionId) return;
-    const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
-    if (selected.length === 0) return;
+    if (selectedObjects.length === 0) return;
     setDeleteDialogOpen(true);
-  }, [bucketName, connectionId, objects, selectedKeys]);
+  }, [bucketName, connectionId, selectedObjects]);
 
   const confirmDelete = React.useCallback(async () => {
     if (!bucketName || !connectionId) return;
-    const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
+    const selected = selectedObjects;
     const selectedKeySet = new Set(selected.map((item) => item.key));
     setIsDeletingFiles(true);
     try {
@@ -1108,6 +1219,11 @@ export default function ObjectBrowserScreen() {
 
       if (canIncrementallyRefresh) {
         setObjects(objects.filter((item) => !selectedKeySet.has(item.key)));
+        setSearchResults((prev) =>
+          prev
+            ? { ...prev, objects: prev.objects.filter((item) => !selectedKeySet.has(item.key)) }
+            : prev
+        );
         silentlyReconcileObjects(connectionId, bucketName, currentPrefix);
       } else {
         await clearBucketSnapshots(connectionId, bucketName);
@@ -1123,7 +1239,7 @@ export default function ObjectBrowserScreen() {
     bucketName,
     connectionId,
     objects,
-    selectedKeys,
+    selectedObjects,
     currentBucket,
     currentConnectionId,
     currentPrefix,
@@ -1147,7 +1263,7 @@ export default function ObjectBrowserScreen() {
   // ── View / share URL ─────────────────────────────────────────────────────
   const handleShareUrls = React.useCallback(async () => {
     if (!bucketName || !connectionId) return;
-    const selected = objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder);
+    const selected = selectedObjects;
     if (selected.length === 0) return;
 
     try {
@@ -1160,7 +1276,7 @@ export default function ObjectBrowserScreen() {
     } catch (error: any) {
       console.error('Share URL error:', error);
     }
-  }, [bucketName, connectionId, objects, selectedKeys]);
+  }, [bucketName, connectionId, selectedObjects]);
 
   const handleCopyPaths = React.useCallback(async () => {
     if (selectedObjects.length === 0) return;
@@ -1484,13 +1600,19 @@ export default function ObjectBrowserScreen() {
         object={item}
         isSelected={selectedKeys.has(item.key)}
         selectionMode={selectionMode}
-        thumbnailUrl={thumbnailUrls[item.key]?.url}
+        thumbnailUrl={
+          failedThumbnailKeys[item.key] &&
+          Date.now() - failedThumbnailKeys[item.key] < FAILED_THUMBNAIL_RETRY_MS
+            ? null
+            : thumbnailUrls[item.key]?.url
+        }
         thumbnailCacheKey={
           connectionId && bucketName && S3Service.isImageFile(item.name)
             ? getThumbnailCacheKey(connectionId, bucketName, item)
             : null
         }
         thumbnailHeaders={proxyHeaders}
+        onThumbnailError={() => handleThumbnailError(item.key)}
         onPress={() => handleFilePress(item)}
         onToggle={() => toggleSelection(item.key)}
         onLongPress={
@@ -1502,9 +1624,11 @@ export default function ObjectBrowserScreen() {
       selectedKeys,
       selectionMode,
       thumbnailUrls,
+      failedThumbnailKeys,
       connectionId,
       bucketName,
       proxyHeaders,
+      handleThumbnailError,
       handleFilePress,
       toggleSelection,
       handleFolderLongPress,
@@ -1666,14 +1790,13 @@ export default function ObjectBrowserScreen() {
           exiting={fadeOut()}
           className="flex-1">
           {initialLoaded ? (
-            <FlatList
+            <FlashList
               key={currentPrefix || '__root__'}
               data={listData}
               keyExtractor={(item) => item.key}
-              initialNumToRender={12}
-              maxToRenderPerBatch={12}
-              windowSize={5}
-              removeClippedSubviews={Platform.OS !== 'web'}
+              extraData={{ selectedKeys, selectionMode, thumbnailUrls, failedThumbnailKeys }}
+              drawDistance={480}
+              getItemType={(item) => (item.isFolder ? 'folder' : 'file')}
               onViewableItemsChanged={onViewableItemsChanged}
               viewabilityConfig={viewabilityConfig}
               renderItem={({ item }) => {
@@ -1689,15 +1812,11 @@ export default function ObjectBrowserScreen() {
                 }
                 return renderItem({ item });
               }}
-              refreshControl={
-                <RefreshControl
-                  refreshing={initialLoaded && isLoading}
-                  onRefresh={() => loadObjects(true)}
-                />
-              }
-              contentContainerClassName="pb-24"
+              refreshing={initialLoaded && isLoading}
+              onRefresh={() => loadObjects(true)}
+              contentContainerStyle={{ paddingBottom: 96 }}
               ListFooterComponent={
-                nextContinuationToken ? (
+                !hasSearchQuery && nextContinuationToken ? (
                   <View className="px-4 py-4">
                     <Button
                       variant="outline"
@@ -1711,10 +1830,17 @@ export default function ObjectBrowserScreen() {
                 ) : null
               }
               ListEmptyComponent={
-                <EmptyState
-                  icon={FolderIcon}
-                  title={t(getEmptyObjectTitleKey(typeFilter, hasSearchQuery))}
-                />
+                shouldShowSearchBusy ? (
+                  <View className="flex-1 items-center justify-center gap-3 px-8 py-20">
+                    <ActivityIndicator size="small" />
+                    <Text className="text-muted-foreground text-sm">{t('bucket.searching')}</Text>
+                  </View>
+                ) : (
+                  <EmptyState
+                    icon={FolderIcon}
+                    title={t(getEmptyObjectTitleKey(typeFilter, hasSearchQuery))}
+                  />
+                )
               }
             />
           ) : (
@@ -1909,7 +2035,7 @@ export default function ObjectBrowserScreen() {
             <AlertDialogTitle>{t('bucket.deleteFiles')}</AlertDialogTitle>
             <AlertDialogDescription>
               {t('bucket.deleteFilesDesc', {
-                count: objects.filter((o) => selectedKeys.has(o.key) && !o.isFolder).length,
+                count: selectedObjects.length,
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>

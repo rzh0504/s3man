@@ -158,17 +158,23 @@ export default function ConfigScreen() {
     transform: [{ scale: themeScale.value }],
   }));
 
+  const closeDropdown = React.useCallback(() => {
+    setOpenDropdown(null);
+  }, []);
+
   const toggleTheme = React.useCallback(() => {
+    closeDropdown();
     themeScale.value = withSequence(
       withTiming(0.65, { duration: 80, easing: Easing.out(Easing.quad) }),
       withTiming(1, { duration: 180, easing: Easing.out(Easing.back(3)) })
     );
     Uniwind.setTheme(theme === 'dark' ? 'light' : 'dark');
-  }, [theme, themeScale]);
+  }, [closeDropdown, theme, themeScale]);
 
   const toggleLanguage = React.useCallback(() => {
+    closeDropdown();
     setLanguage(language === 'zh' ? 'en' : 'zh');
-  }, [language, setLanguage]);
+  }, [closeDropdown, language, setLanguage]);
 
   const handleTransferHistoryDaysChange = React.useCallback(
     (value: (typeof TRANSFER_HISTORY_OPTIONS)[number]) => {
@@ -235,6 +241,7 @@ export default function ConfigScreen() {
   }, [downloadDirectoryName, downloadDirectoryUri, t]);
 
   const handlePickDownloadDirectory = React.useCallback(async () => {
+    closeDropdown();
     if (Platform.OS !== 'android') {
       Alert.alert(t('settings.downloadDirectory'), t('settings.downloadDirectoryOtherDesc'));
       return;
@@ -259,11 +266,12 @@ export default function ConfigScreen() {
         error?.message || t('settings.downloadDirectoryAndroidDesc')
       );
     }
-  }, [downloadDirectoryUri, setDownloadDirectory, t]);
+  }, [closeDropdown, downloadDirectoryUri, setDownloadDirectory, t]);
 
   const handleResetDownloadDirectory = React.useCallback(() => {
+    closeDropdown();
     setDownloadDirectory(null);
-  }, [setDownloadDirectory]);
+  }, [closeDropdown, setDownloadDirectory]);
 
   return (
     <ScreenTransitionView className="bg-background flex-1" style={{ paddingTop: insets.top }}>
@@ -280,12 +288,19 @@ export default function ConfigScreen() {
 
       <Separator />
 
-      <ScrollView className="flex-1" contentContainerClassName="px-6 pb-12 pt-3">
+      <ScrollView
+        className="flex-1"
+        contentContainerClassName="px-6 pb-12 pt-3"
+        onScrollBeginDrag={closeDropdown}
+        keyboardShouldPersistTaps="handled">
         {/* ── Connections ─────────────────────────────────────────────── */}
         <NativeOnlyAnimatedView entering={fadeIn()}>
           <View className="border-border bg-card rounded-xl border">
             <Pressable
-              onPress={() => router.push('/connections' as any)}
+              onPress={() => {
+                closeDropdown();
+                router.push('/connections' as any);
+              }}
               className="active:bg-accent flex-row items-center gap-3 rounded-xl px-4 py-3.5">
               <Icon as={WifiIcon} className="text-foreground size-5" />
               <View className="flex-1 flex-row items-center justify-between">
@@ -340,7 +355,10 @@ export default function ConfigScreen() {
             {/* Thumbnails */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">
               <Pressable
-                onPress={() => setShowThumbnails(!showThumbnails)}
+                onPress={() => {
+                  closeDropdown();
+                  setShowThumbnails(!showThumbnails);
+                }}
                 className="active:bg-accent -my-3.5 -ml-1 flex-1 rounded-lg px-1 py-3.5">
                 <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
                   {t('settings.thumbnails')}
@@ -348,7 +366,10 @@ export default function ConfigScreen() {
               </Pressable>
               <Checkbox
                 checked={showThumbnails}
-                onCheckedChange={(checked) => setShowThumbnails(!!checked)}
+                onCheckedChange={(checked) => {
+                  closeDropdown();
+                  setShowThumbnails(!!checked);
+                }}
               />
             </View>
 

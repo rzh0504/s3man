@@ -22,7 +22,8 @@ import {
   FileSpreadsheetIcon,
 } from 'lucide-react-native';
 import React from 'react';
-import { View, Image } from 'react-native';
+import { View } from 'react-native';
+import { Image } from 'expo-image';
 import { getFileExtension } from '@/lib/constants';
 import { t } from '@/lib/i18n';
 import { fadeIn, fadeOut } from '@/components/ui/fade-motion';
@@ -148,9 +149,11 @@ export const TransferItem = React.memo(function TransferItem({
           <View className="flex-row items-center gap-3">
             {hasThumbnail ? (
               <Image
-                source={{ uri: thumbnailUri }}
+                source={{ uri: thumbnailUri, cacheKey: `transfer:${thumbnailUri}` }}
                 className="size-10 rounded-md"
-                resizeMode="cover"
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={0}
               />
             ) : (
               <Icon as={fileTypeInfo.icon} className={`${fileTypeInfo.color} size-6`} />

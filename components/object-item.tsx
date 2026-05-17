@@ -71,6 +71,7 @@ interface ObjectItemProps {
   thumbnailUrl?: string | null;
   thumbnailCacheKey?: string | null;
   thumbnailHeaders?: Record<string, string> | null;
+  onThumbnailError?: () => void;
   onPress: () => void;
   onToggle: () => void;
   onLongPress?: () => void;
@@ -84,10 +85,12 @@ function ImageThumbnail({
   url,
   cacheKey,
   headers,
+  onError,
 }: {
   url: string;
   cacheKey: string;
   headers?: Record<string, string> | null;
+  onError?: () => void;
 }) {
   const [loaded, setLoaded] = React.useState(() => loadedThumbnailCacheKeys.has(cacheKey));
   const [error, setError] = React.useState(false);
@@ -125,7 +128,10 @@ function ImageThumbnail({
           loadedThumbnailCacheKeys.add(cacheKey);
           setLoaded(true);
         }}
-        onError={() => setError(true)}
+        onError={() => {
+          setError(true);
+          onError?.();
+        }}
       />
     </View>
   );
@@ -146,6 +152,7 @@ export const ObjectItem = React.memo(function ObjectItem({
   thumbnailUrl,
   thumbnailCacheKey,
   thumbnailHeaders,
+  onThumbnailError,
   onPress,
   onToggle,
   onLongPress,
@@ -184,6 +191,7 @@ export const ObjectItem = React.memo(function ObjectItem({
           url={thumbnailUrl}
           cacheKey={thumbnailCacheKey}
           headers={thumbnailHeaders}
+          onError={onThumbnailError}
         />
       ) : (
         <FileTypeIcon info={fileTypeInfo} />

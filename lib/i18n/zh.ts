@@ -220,6 +220,8 @@ export default {
   'bucket.loadMore': '加载更多',
   'bucket.loadingMore': '加载中...',
   'bucket.searchPlaceholder': '搜索文件',
+  'bucket.searching': '搜索中...',
+  'bucket.searchFailed': '搜索失败',
   'bucket.filterAll': '全部',
   'bucket.filterImages': '图片',
   'bucket.filterMedia': '媒体',
