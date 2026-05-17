@@ -9,6 +9,7 @@
     "ios": "expo start -c --ios",
     "web": "expo start -c --web",
     "typecheck": "tsc --noEmit",
+    "test": "node --test scripts/*.test.mjs",
     "upload:github": "node ./scripts/upload-github-release.mjs",
     "clean": "rm -rf .expo node_modules"
   },

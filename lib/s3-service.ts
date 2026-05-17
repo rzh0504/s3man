@@ -206,45 +206,51 @@ export async function listObjects(
 
   const { client } = getClientEntry(connectionId);
 
-  const response = await client.send(
-    new ListObjectsV2Command({
-      Bucket: bucket,
-      Prefix: prefix,
-      Delimiter: '/',
-    })
-  );
-
   const objects: S3Object[] = [];
+  let continuationToken: string | undefined;
 
-  if (response.CommonPrefixes) {
-    for (const cp of response.CommonPrefixes) {
-      if (cp.Prefix) {
-        const folderName = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
-        objects.push({
-          key: cp.Prefix,
-          name: folderName + '/',
-          isFolder: true,
-        });
-      }
-    }
-  }
+  do {
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        Delimiter: '/',
+        ContinuationToken: continuationToken,
+      })
+    );
 
-  if (response.Contents) {
-    for (const obj of response.Contents) {
-      if (obj.Key && obj.Key !== prefix) {
-        const fileName = obj.Key.slice(prefix.length);
-        if (fileName) {
+    if (response.CommonPrefixes) {
+      for (const cp of response.CommonPrefixes) {
+        if (cp.Prefix) {
+          const folderName = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
           objects.push({
-            key: obj.Key,
-            name: fileName,
-            size: obj.Size,
-            lastModified: obj.LastModified?.toISOString(),
-            isFolder: false,
+            key: cp.Prefix,
+            name: folderName + '/',
+            isFolder: true,
           });
         }
       }
     }
-  }
+
+    if (response.Contents) {
+      for (const obj of response.Contents) {
+        if (obj.Key && obj.Key !== prefix) {
+          const fileName = obj.Key.slice(prefix.length);
+          if (fileName) {
+            objects.push({
+              key: obj.Key,
+              name: fileName,
+              size: obj.Size,
+              lastModified: obj.LastModified?.toISOString(),
+              isFolder: false,
+            });
+          }
+        }
+      }
+    }
+
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
 
   // Cache for 60 seconds
   objectListCache.set(cacheKey, objects, 60);

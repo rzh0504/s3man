@@ -76,6 +76,7 @@ import {
 import { useSettingsStore } from '@/lib/stores/settings-store';
 import { useT } from '@/lib/i18n';
 import { runUploadTask } from '@/lib/upload-executor';
+import { registerTransferController, unregisterTransferController } from '@/lib/transfer-controller';
 import {
   IMAGE_COMPRESSION_FAILED_ERROR,
   resolveInitialUploadFileName,
@@ -93,6 +94,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+
+const TEXT_PREVIEW_MAX_BYTES = 102400;
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -725,14 +728,13 @@ export default function ObjectBrowserScreen() {
           // PDF: store the URL so preview can offer "open in browser"
           setPreviewUrl(url);
         } else if (S3Service.isCodeFile(obj.name)) {
-          // Fetch text content for code/text files
+          // Fetch only the preview slice so large files do not get fully loaded into memory.
           const headers = S3Service.getProxyHeaders(connectionId) || {};
+          headers.Range = `bytes=0-${TEXT_PREVIEW_MAX_BYTES - 1}`;
           const response = await fetch(url, { headers });
           const text = await response.text();
-          // Limit to 100KB for display
-          setPreviewText(
-            text.length > 102400 ? text.slice(0, 102400) + '\n\n... (truncated)' : text
-          );
+          const isTruncated = (obj.size ?? 0) > TEXT_PREVIEW_MAX_BYTES;
+          setPreviewText(isTruncated ? text + '\n\n... (truncated)' : text);
         }
       } catch (error: any) {
         console.error('Preview error:', error);
@@ -763,10 +765,13 @@ export default function ObjectBrowserScreen() {
         bucket: bucketName,
         key: obj.key,
         connectionId,
+        supportsPause: true,
         startedAt: new Date().toISOString(),
       };
       addTask(task);
       showSystemToast(t('bucket.downloadStarted', { name: obj.name }));
+      let wasCancelled = false;
+      let wasPaused = false;
 
       try {
         const url = await S3Service.getFileUrl(connectionId, bucketName, obj.key);
@@ -775,50 +780,93 @@ export default function ObjectBrowserScreen() {
         const isImageDownload = S3Service.isImageFile(obj.name);
         updateTask(taskId, { progress: 10 });
 
-        const downloadResult = await FileSystem.downloadAsync(url, appDownloadUri, {
-          headers: S3Service.getProxyHeaders(connectionId) || undefined,
-        });
+        const finalizeDownload = async (downloadResult: FileSystem.FileSystemDownloadResult) => {
+          let finalUri = downloadResult.uri;
+          let locationLabel = defaultLocationLabel;
 
-        let finalUri = downloadResult.uri;
-        let locationLabel = defaultLocationLabel;
-
-        if (Platform.OS === 'android' && isSafDirectoryUri(downloadDirectoryUri)) {
-          finalUri = await copyFileToSafDirectoryAsync({
-            sourceUri: downloadResult.uri,
-            directoryUri: downloadDirectoryUri,
-            fileName: obj.name,
-            mimeType: S3Service.guessMimeType(obj.name),
-          });
-          locationLabel = formatDownloadDirectoryLabel(
-            downloadDirectoryName || getDownloadDirectoryNameFromUri(downloadDirectoryUri)
-          );
-          if (!isImageDownload) {
-            await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(() => {});
+          if (Platform.OS === 'android' && isSafDirectoryUri(downloadDirectoryUri)) {
+            finalUri = await copyFileToSafDirectoryAsync({
+              sourceUri: downloadResult.uri,
+              directoryUri: downloadDirectoryUri,
+              fileName: obj.name,
+              mimeType: S3Service.guessMimeType(obj.name),
+            });
+            locationLabel = formatDownloadDirectoryLabel(
+              downloadDirectoryName || getDownloadDirectoryNameFromUri(downloadDirectoryUri)
+            );
+            if (!isImageDownload) {
+              await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true }).catch(() => {});
+            }
           }
-        }
 
-        updateTask(taskId, {
-          progress: 100,
-          transferredBytes: obj.size ?? 0,
-          status: 'completed',
-          localPath: finalUri,
-          previewPath:
-            Platform.OS === 'android' && isSafDirectoryUri(downloadDirectoryUri) && isImageDownload
-              ? downloadResult.uri
-              : undefined,
-          completedAt: new Date().toISOString(),
+          unregisterTransferController(taskId);
+          updateTask(taskId, {
+            progress: 100,
+            transferredBytes: obj.size ?? 0,
+            status: 'completed',
+            localPath: finalUri,
+            previewPath:
+              Platform.OS === 'android' && isSafDirectoryUri(downloadDirectoryUri) && isImageDownload
+                ? downloadResult.uri
+                : undefined,
+            completedAt: new Date().toISOString(),
+          });
+          showSystemToast(t('bucket.downloadCompleteDesc', { name: obj.name, location: locationLabel }));
+        };
+
+        const downloadResumable = FileSystem.createDownloadResumable(url, appDownloadUri, {
+          headers: S3Service.getProxyHeaders(connectionId) || undefined,
+        }, (data) => {
+          const expectedBytes =
+            data.totalBytesExpectedToWrite > 0 ? data.totalBytesExpectedToWrite : obj.size ?? 0;
+          const progress = expectedBytes > 0
+            ? Math.min(99, Math.round((data.totalBytesWritten / expectedBytes) * 100))
+            : 10;
+          updateTask(taskId, {
+            progress,
+            totalBytes: expectedBytes,
+            transferredBytes: data.totalBytesWritten,
+          });
         });
-        showSystemToast(t('bucket.downloadCompleteDesc', { name: obj.name, location: locationLabel }));
+
+        registerTransferController(taskId, {
+          cancel: async () => {
+            wasCancelled = true;
+            await downloadResumable.cancelAsync();
+          },
+          pause: async () => {
+            wasPaused = true;
+            await downloadResumable.pauseAsync();
+          },
+          resume: async () => {
+            wasPaused = false;
+            const resumedResult = await downloadResumable.resumeAsync();
+            if (resumedResult) {
+              await finalizeDownload(resumedResult);
+            }
+          },
+        });
+
+        const downloadResult = await downloadResumable.downloadAsync();
+        if (!downloadResult) {
+          if (wasPaused || wasCancelled) return;
+          throw new Error('Download stopped');
+        }
+        await finalizeDownload(downloadResult);
       } catch (error: any) {
         console.error('Download error:', error);
-        if (appDownloadUri) {
+        unregisterTransferController(taskId);
+        if (appDownloadUri && !wasPaused) {
           await FileSystem.deleteAsync(appDownloadUri, { idempotent: true }).catch(() => {});
         }
+        if (wasPaused) return;
         updateTask(taskId, {
           status: 'failed',
-          error: error.message || 'Download failed',
+          error: wasCancelled ? 'Cancelled' : error.message || 'Download failed',
         });
-        showSystemToast(error.message || t('bucket.downloadFailed'));
+        if (!wasCancelled) {
+          showSystemToast(error.message || t('bucket.downloadFailed'));
+        }
       }
     },
     [

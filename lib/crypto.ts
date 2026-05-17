@@ -1,15 +1,14 @@
 import { Buffer } from 'buffer';
 
 /**
- * Simple symmetric encryption for config export/import.
- * Uses XOR with a key derived from the app-specific salt + a random IV,
- * then encodes as base64. This prevents credentials from being readable
- * in the exported file while allowing seamless import.
+ * Symmetric encryption for config export/import.
  *
- * Format: base64(iv(16) + xor_encrypted_data)
+ * Current format: aes-gcm:<base64(iv(12) + ciphertext + auth tag)>
+ * Legacy v2 imports still support the old base64(iv(16) + xor_encrypted_data) format.
  */
 
 const APP_SALT = 's3man-config-v2-2026';
+const AES_PREFIX = 'aes-gcm:';
 
 /** Derive a repeating key from salt + IV */
 function deriveKey(salt: string, iv: Uint8Array): Uint8Array {
@@ -30,8 +29,24 @@ function xorTransform(data: Uint8Array, key: Uint8Array): Uint8Array {
   return result;
 }
 
-/** Encrypt a JSON string → base64 encoded encrypted string */
-export function encryptConfig(plaintext: string): string {
+function hasSubtleCrypto(): boolean {
+  return typeof crypto !== 'undefined' && !!crypto.subtle;
+}
+
+async function deriveAesKey(): Promise<CryptoKey> {
+  const keyMaterial = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(APP_SALT));
+  return crypto.subtle.importKey('raw', keyMaterial, 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
+function encodeBase64(data: Uint8Array): string {
+  return Buffer.from(data).toString('base64');
+}
+
+function decodeBase64(encoded: string): Uint8Array {
+  return new Uint8Array(Buffer.from(encoded, 'base64'));
+}
+
+function encryptLegacyConfig(plaintext: string): string {
   const iv = new Uint8Array(16);
   crypto.getRandomValues(iv);
 
@@ -44,12 +59,11 @@ export function encryptConfig(plaintext: string): string {
   combined.set(iv, 0);
   combined.set(encrypted, iv.length);
 
-  return Buffer.from(combined).toString('base64');
+  return encodeBase64(combined);
 }
 
-/** Decrypt a base64 encrypted string → original JSON string */
-export function decryptConfig(encoded: string): string {
-  const combined = new Uint8Array(Buffer.from(encoded, 'base64'));
+function decryptLegacyConfig(encoded: string): string {
+  const combined = decodeBase64(encoded);
 
   if (combined.length < 17) {
     throw new Error('Invalid encrypted data');
@@ -61,5 +75,45 @@ export function decryptConfig(encoded: string): string {
   const key = deriveKey(APP_SALT, iv);
   const decrypted = xorTransform(encrypted, key);
 
+  return new TextDecoder().decode(decrypted);
+}
+
+/** Encrypt a JSON string. AES-GCM is used when WebCrypto is available. */
+export async function encryptConfig(plaintext: string): Promise<string> {
+  if (!hasSubtleCrypto()) {
+    return encryptLegacyConfig(plaintext);
+  }
+
+  const iv = new Uint8Array(12);
+  crypto.getRandomValues(iv);
+  const key = await deriveAesKey();
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext))
+  );
+  const combined = new Uint8Array(iv.length + ciphertext.length);
+  combined.set(iv, 0);
+  combined.set(ciphertext, iv.length);
+  return AES_PREFIX + encodeBase64(combined);
+}
+
+/** Decrypt an encrypted config string. Supports current AES-GCM and legacy v2 XOR. */
+export async function decryptConfig(encoded: string): Promise<string> {
+  if (!encoded.startsWith(AES_PREFIX)) {
+    return decryptLegacyConfig(encoded);
+  }
+
+  if (!hasSubtleCrypto()) {
+    throw new Error('AES-GCM decryption is unavailable in this runtime');
+  }
+
+  const combined = decodeBase64(encoded.slice(AES_PREFIX.length));
+  if (combined.length < 13) {
+    throw new Error('Invalid encrypted data');
+  }
+
+  const iv = combined.slice(0, 12);
+  const ciphertext = combined.slice(12);
+  const key = await deriveAesKey();
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
   return new TextDecoder().decode(decrypted);
 }

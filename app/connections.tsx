@@ -222,12 +222,12 @@ interface ExportPayload {
 
 interface EncryptedFile {
   app: 's3man';
-  version: 2;
+  version: 2 | 3;
   exportedAt: string;
   data: string; // encrypted base64
 }
 
-function buildEncryptedFile(connections: S3Connection[]): EncryptedFile {
+async function buildEncryptedFile(connections: S3Connection[]): Promise<EncryptedFile> {
   const payload: ExportPayload = {
     version: 2,
     exportedAt: new Date().toISOString(),
@@ -238,18 +238,23 @@ function buildEncryptedFile(connections: S3Connection[]): EncryptedFile {
   };
   return {
     app: 's3man',
-    version: 2,
+    version: 3,
     exportedAt: payload.exportedAt,
-    data: encryptConfig(JSON.stringify(payload)),
+    data: await encryptConfig(JSON.stringify(payload)),
   };
 }
 
-function parseImportFile(content: string): ExportPayload {
+async function parseImportFile(content: string): Promise<ExportPayload> {
   const file = JSON.parse(content);
 
-  // v2 encrypted format
-  if (file && file.app === 's3man' && file.version === 2 && typeof file.data === 'string') {
-    const decrypted = decryptConfig(file.data);
+  // v2 legacy encrypted format and v3 AES-GCM format
+  if (
+    file &&
+    file.app === 's3man' &&
+    (file.version === 2 || file.version === 3) &&
+    typeof file.data === 'string'
+  ) {
+    const decrypted = await decryptConfig(file.data);
     const payload = JSON.parse(decrypted);
     if (!payload || !Array.isArray(payload.connections)) {
       throw new Error('Invalid decrypted config data');
@@ -511,7 +516,7 @@ export default function ConnectionsScreen() {
     if (connections.length === 0) return;
     setIsExporting(true);
     try {
-      const encrypted = buildEncryptedFile(connections);
+      const encrypted = await buildEncryptedFile(connections);
       const json = JSON.stringify(encrypted);
       const fileName = `s3man-config-${new Date().toISOString().slice(0, 10)}.s3man`;
       const fileUri = FileSystem.cacheDirectory + fileName;
@@ -553,7 +558,7 @@ export default function ConnectionsScreen() {
           : await FileSystem.readAsStringAsync(fileUri, {
               encoding: FileSystem.EncodingType.UTF8,
             });
-      const payload = parseImportFile(content);
+      const payload = await parseImportFile(content);
       let imported = 0;
       for (const entry of payload.connections) {
         try {

@@ -3,6 +3,11 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { TransferFilter, TransferTask, TransferStatus } from '@/lib/types';
 import { useSettingsStore, type TransferHistoryDays } from '@/lib/stores/settings-store';
+import {
+  cancelRegisteredTransfer,
+  pauseRegisteredTransfer,
+  resumeRegisteredTransfer,
+} from '@/lib/transfer-controller';
 
 const STORAGE_KEY = 's3man_transfers';
 const STORAGE_FILE = `${FileSystem.documentDirectory ?? ''}s3man-transfers.json`;
@@ -21,9 +26,9 @@ interface TransferState {
   addTask: (task: TransferTask) => void;
   updateTask: (id: string, updates: Partial<TransferTask>) => void;
   removeTask: (id: string) => void;
-  pauseTask: (id: string) => void;
-  resumeTask: (id: string) => void;
-  cancelTask: (id: string) => void;
+  pauseTask: (id: string) => Promise<void>;
+  resumeTask: (id: string) => Promise<void>;
+  cancelTask: (id: string) => Promise<void>;
   filteredTasks: () => TransferTask[];
 }
 
@@ -143,26 +148,34 @@ export const useTransferStore = create<TransferState>((set, get) => {
 
     removeTask: (id) => commitTasks((tasks) => tasks.filter((task) => task.id !== id)),
 
-    pauseTask: (id) =>
+    pauseTask: async (id) => {
+      const paused = await pauseRegisteredTransfer(id).catch(() => false);
+      if (!paused) return;
       commitTasks((tasks) =>
         tasks.map((task) =>
           task.id === id ? { ...task, status: 'paused' as TransferStatus } : task
         )
-      ),
+      );
+    },
 
-    resumeTask: (id) =>
+    resumeTask: async (id) => {
+      const resumed = await resumeRegisteredTransfer(id).catch(() => false);
+      if (!resumed) return;
       commitTasks((tasks) =>
         tasks.map((task) =>
           task.id === id ? { ...task, status: 'active' as TransferStatus } : task
         )
-      ),
+      );
+    },
 
-    cancelTask: (id) =>
+    cancelTask: async (id) => {
+      await cancelRegisteredTransfer(id).catch(() => false);
       commitTasks((tasks) =>
         tasks.map((task) =>
           task.id === id ? { ...task, status: 'failed' as TransferStatus, error: 'Cancelled' } : task
         )
-      ),
+      );
+    },
 
     filteredTasks: () => {
       const { tasks, filter } = get();

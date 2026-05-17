@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as S3Service from '@/lib/s3-service';
 import type { S3Object, TransferTask } from '@/lib/types';
 import { prepareUploadFile, type UploadFileLike, type UploadImageCompression } from '@/lib/upload-preprocess';
+import { registerTransferController, unregisterTransferController } from '@/lib/transfer-controller';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -47,8 +48,8 @@ export async function runUploadTask({
   onPreparedFile,
   onProgress,
 }: RunUploadTaskOptions): Promise<RunUploadTaskResult> {
-  let progressTimer: ReturnType<typeof setInterval> | null = null;
   let taskId: string | null = null;
+  let wasCancelled = false;
 
   try {
     const uploadFile = await prepareUploadFile(inputFile, {
@@ -81,34 +82,39 @@ export async function runUploadTask({
 
     const presignedUrl = await S3Service.getPresignedUploadUrl(connectionId, bucket, uploadKey, mimeType);
 
-    let currentProgress = initialProgress;
-    onProgress?.(currentProgress);
-    updateTask(activeTaskId, { progress: currentProgress });
+    onProgress?.(initialProgress);
+    updateTask(activeTaskId, { progress: initialProgress });
 
-    const increment = fileSize > 10_000_000 ? 1.5 : fileSize > 1_000_000 ? 4 : 10;
-    const interval = fileSize > 10_000_000 ? 800 : 500;
-    progressTimer = setInterval(() => {
-      if (currentProgress < 90) {
-        currentProgress = Math.min(90, currentProgress + increment);
-      } else if (currentProgress < 99) {
-        currentProgress = Math.min(99, currentProgress + 0.5);
-      }
-
-      const roundedProgress = Math.round(currentProgress);
-      onProgress?.(roundedProgress);
-      updateTask(activeTaskId, {
-        progress: roundedProgress,
-        transferredBytes: Math.round((roundedProgress / 100) * fileSize),
-      });
-    }, interval);
-
-    await FileSystem.uploadAsync(presignedUrl, uploadFile.uri, {
+    const uploadTask = FileSystem.createUploadTask(presignedUrl, uploadFile.uri, {
       httpMethod: 'PUT',
       uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
       headers: { 'Content-Type': mimeType },
+    }, (data) => {
+      const expectedBytes = data.totalBytesExpectedToSend > 0 ? data.totalBytesExpectedToSend : fileSize;
+      const progress = expectedBytes > 0
+        ? Math.min(99, Math.round((data.totalBytesSent / expectedBytes) * 100))
+        : initialProgress;
+      onProgress?.(progress);
+      updateTask(activeTaskId, {
+        progress,
+        totalBytes: expectedBytes,
+        transferredBytes: data.totalBytesSent,
+      });
     });
 
-    if (progressTimer) clearInterval(progressTimer);
+    registerTransferController(activeTaskId, {
+      cancel: async () => {
+        wasCancelled = true;
+        await uploadTask.cancelAsync();
+      },
+    });
+
+    const uploadResult = await uploadTask.uploadAsync();
+    if (!uploadResult || wasCancelled) {
+      throw new Error('Cancelled');
+    }
+
+    unregisterTransferController(activeTaskId);
     onProgress?.(100);
     updateTask(activeTaskId, {
       progress: 100,
@@ -129,8 +135,12 @@ export async function runUploadTask({
       },
     };
   } catch (error) {
-    if (progressTimer) clearInterval(progressTimer);
-    const errorMessage = mapError ? mapError(error) : error instanceof Error ? error.message : 'Upload failed';
+    if (taskId) unregisterTransferController(taskId);
+    const errorMessage = wasCancelled
+      ? 'Cancelled'
+      : mapError
+        ? mapError(error)
+        : error instanceof Error ? error.message : 'Upload failed';
     if (taskId) {
       updateTask(taskId, {
         status: 'failed',

@@ -108,6 +108,7 @@ export default {
       secretKey: s3Cfg.s,
       body: method === 'PUT' ? request.body : null,
       contentType: request.headers.get('Content-Type') || undefined,
+      range: request.headers.get('Range') || undefined,
     });
 
     const s3Request: CfAwareRequestInit = {
@@ -362,7 +363,8 @@ function corsHeaders(): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, PUT, HEAD, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-S3-Endpoint, X-S3-Region, X-S3-Access-Key, X-S3-Secret-Key',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range, X-S3-Endpoint, X-S3-Region, X-S3-Access-Key, X-S3-Secret-Key',
+    'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified',
     'Access-Control-Max-Age': '86400',
   };
 }
@@ -377,10 +379,11 @@ interface SignParams {
   secretKey: string;
   body: ReadableStream | null;
   contentType?: string;
+  range?: string;
 }
 
 async function signRequest(params: SignParams): Promise<Record<string, string>> {
-  const { method, url, region, accessKey, secretKey, contentType } = params;
+  const { method, url, region, accessKey, secretKey, contentType, range } = params;
   const parsedUrl = new URL(url);
 
   const service = 's3';
@@ -400,6 +403,9 @@ async function signRequest(params: SignParams): Promise<Record<string, string>> 
   };
   if (contentType) {
     headers['content-type'] = contentType;
+  }
+  if (range) {
+    headers.range = range;
   }
 
   // Canonical headers (sorted)

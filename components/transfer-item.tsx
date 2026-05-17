@@ -114,6 +114,7 @@ export const TransferItem = React.memo(function TransferItem({
   const isPaused = task.status === 'paused';
   const isCompleted = task.status === 'completed';
   const isFailed = task.status === 'failed';
+  const supportsPause = task.supportsPause === true;
 
   const progressText = React.useMemo(() => {
     if (isCompleted) {
@@ -187,7 +188,7 @@ export const TransferItem = React.memo(function TransferItem({
           {/* Action buttons */}
           {(isActive || isPaused) && (
             <View className="flex-row items-center justify-end gap-2">
-              {isActive && (
+              {isActive && supportsPause && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -197,7 +198,7 @@ export const TransferItem = React.memo(function TransferItem({
                   <Text>{t('transfers.pause')}</Text>
                 </Button>
               )}
-              {isPaused && (
+              {isPaused && supportsPause && (
                 <Button
                   variant="outline"
                   size="sm"
