@@ -205,7 +205,9 @@ export default function ConfigScreen() {
             {/* Theme */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">
               <View className="flex-1">
-                <Text className="text-foreground text-sm font-medium">{t('settings.darkMode')}</Text>
+                <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
+                  {t('settings.darkMode')}
+                </Text>
               </View>
               <Pressable
                 onPress={toggleTheme}
@@ -228,7 +230,7 @@ export default function ConfigScreen() {
               <Pressable
                 onPress={() => setShowThumbnails(!showThumbnails)}
                 className="active:bg-accent -my-3.5 -ml-1 flex-1 rounded-lg px-1 py-3.5">
-                <Text className="text-foreground text-sm font-medium">
+                <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
                   {t('settings.thumbnails')}
                 </Text>
               </Pressable>
@@ -241,8 +243,8 @@ export default function ConfigScreen() {
             <Separator />
 
             {/* Transfer History */}
-            <View className="flex-row items-center justify-between gap-3 px-4 py-3.5">
-              <Text className="text-foreground flex-1 text-sm font-medium">
+            <View className="gap-3 px-4 py-3.5">
+              <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
                 {t('settings.transferHistoryDays')}
               </Text>
               <View className="bg-muted flex-row gap-1 rounded-lg p-1">
@@ -252,7 +254,7 @@ export default function ConfigScreen() {
                     <Pressable
                       key={option}
                       onPress={() => handleTransferHistoryDaysChange(option)}
-                      className={`min-w-12 items-center justify-center rounded-md px-2.5 py-1.5 ${
+                      className={`flex-1 items-center justify-center rounded-md px-2.5 py-1.5 ${
                         isActive
                           ? 'bg-background border border-transparent shadow-sm shadow-black/5 dark:border-foreground/10 dark:bg-input/30'
                           : ''
@@ -273,18 +275,18 @@ export default function ConfigScreen() {
 
             {/* Download Directory */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">
-              <View className="flex-1">
-                <Text className="text-foreground text-sm font-medium">
+              <View className="min-w-0 flex-1">
+                <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
                   {t('settings.downloadDirectory')}
                 </Text>
               </View>
               <Text
                 numberOfLines={1}
-                className="text-muted-foreground max-w-64 flex-1 text-right text-sm">
+                className="text-muted-foreground max-w-40 flex-1 text-right text-sm">
                 {downloadDirectoryLabel}
               </Text>
               {Platform.OS === 'android' ? (
-                <View className="flex-row items-center gap-1">
+                <View className="shrink-0 flex-row items-center gap-1">
                   <Pressable
                     onPress={handlePickDownloadDirectory}
                     className="active:bg-accent -my-2 rounded-full p-2"
@@ -309,8 +311,10 @@ export default function ConfigScreen() {
 
             {/* Language */}
             <View className="flex-row items-center gap-3 px-4 py-3.5">
-              <View className="flex-1">
-                <Text className="text-foreground text-sm font-medium">{t('settings.language')}</Text>
+              <View className="min-w-0 flex-1">
+                <Text className="text-foreground text-sm font-medium" numberOfLines={1}>
+                  {t('settings.language')}
+                </Text>
               </View>
               <View className="flex-row items-center gap-2">
                 <Text className="text-muted-foreground text-sm">

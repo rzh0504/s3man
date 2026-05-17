@@ -57,11 +57,11 @@ export default {
   'settings.languageDesc': 'Switch app display language',
   'settings.languageEn': 'English',
   'settings.languageZh': '中文',
-  'settings.transferHistoryDays': 'Transfer History Retention',
+  'settings.transferHistoryDays': 'History Retention',
   'settings.transferHistory1d': '1 Day',
   'settings.transferHistory3d': '3 Days',
   'settings.transferHistory7d': '7 Days',
-  'settings.downloadDirectory': 'Download Directory',
+  'settings.downloadDirectory': 'Download Folder',
   'settings.downloadDirectoryDefault': 'App storage / s3downloads',
   'settings.downloadDirectoryAndroidDesc':
     'Android can save directly into a folder you pick from the system file picker.',
