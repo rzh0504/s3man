@@ -16,6 +16,7 @@ import {
   GlobeIcon,
   PlayIcon,
   PauseIcon,
+  Maximize2Icon,
 } from 'lucide-react-native';
 import * as React from 'react';
 import {
@@ -77,44 +78,93 @@ function formatAudioTime(seconds: number): string {
 
 function VideoPreview({ url, headers }: { url: string; headers?: Record<string, string> | null }) {
   const source = React.useMemo(() => ({ uri: url, headers: headers ?? undefined }), [headers, url]);
-  const [viewVersion, setViewVersion] = React.useState(0);
+  const videoRef = React.useRef<React.ElementRef<typeof VideoView>>(null);
   const [firstFrameReady, setFirstFrameReady] = React.useState(false);
+  const [controlsVisible, setControlsVisible] = React.useState(true);
   const player = useVideoPlayer(source, (p) => {
     p.loop = false;
+  });
+  const { isPlaying } = useEvent(player, 'playingChange', {
+    isPlaying: player.playing,
+  });
+  const { status } = useEvent(player, 'statusChange', {
+    status: player.status,
   });
 
   React.useEffect(() => {
     setFirstFrameReady(false);
+    setControlsVisible(true);
   }, [source]);
 
-  const handleFullscreenExit = React.useCallback(() => {
-    setFirstFrameReady(false);
-    setViewVersion((version) => version + 1);
+  const togglePlayback = React.useCallback(() => {
+    if (isPlaying) {
+      player.pause();
+      setControlsVisible(true);
+      return;
+    }
+
+    player.play();
+    setControlsVisible(false);
+  }, [isPlaying, player]);
+
+  const toggleControls = React.useCallback(() => {
+    setControlsVisible((visible) => (isPlaying ? !visible : true));
+  }, [isPlaying]);
+
+  const enterFullscreen = React.useCallback(() => {
+    void videoRef.current?.enterFullscreen();
   }, []);
+
+  const isLoading = status === 'loading' || status === 'idle' || !firstFrameReady;
 
   return (
     <View className="w-full items-center justify-center p-4">
       <View className="bg-muted overflow-hidden rounded-xl">
         <VideoView
-          key={`${url}:${viewVersion}`}
+          ref={videoRef}
           player={player}
           style={{
             width: MAX_PREVIEW_WIDTH,
             height: MAX_PREVIEW_WIDTH * (9 / 16),
           }}
-          nativeControls
+          nativeControls={false}
           fullscreenOptions={{ enable: true }}
           useExoShutter={false}
           surfaceType={Platform.OS === 'android' ? 'textureView' : undefined}
           onFirstFrameRender={() => setFirstFrameReady(true)}
-          onFullscreenExit={handleFullscreenExit}
         />
-        {!firstFrameReady ? (
+        {isLoading ? (
           <View
             pointerEvents="none"
-            className="absolute inset-0 items-center justify-center bg-black">
-            <ActivityIndicator size="small" color="#fff" />
+            className="bg-muted absolute inset-0 items-center justify-center">
+            <ActivityIndicator size="small" color="#6b7280" />
           </View>
+        ) : null}
+        {firstFrameReady ? (
+          <Pressable className="absolute inset-0" onPress={toggleControls}>
+            {controlsVisible ? (
+              <View className="flex-1 items-center justify-center bg-black/35">
+                <Pressable
+                  onPress={togglePlayback}
+                  accessibilityRole="button"
+                  accessibilityLabel={isPlaying ? t('preview.pauseAudio') : t('preview.playAudio')}
+                  className="size-10 items-center justify-center active:opacity-70">
+                  <Icon
+                    as={isPlaying ? PauseIcon : PlayIcon}
+                    className="size-7 text-white"
+                    strokeWidth={1.8}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={enterFullscreen}
+                  accessibilityRole="button"
+                  className="size-8 items-center justify-center active:opacity-70"
+                  style={{ position: 'absolute', right: 12, bottom: 12 }}>
+                  <Icon as={Maximize2Icon} className="size-4 text-white" />
+                </Pressable>
+              </View>
+            ) : null}
+          </Pressable>
         ) : null}
       </View>
     </View>
