@@ -235,6 +235,7 @@ export default {
   'bucket.move': '移动',
   'bucket.copyPath': '复制路径',
   'bucket.copyPaths': '复制路径',
+  'bucket.fileName': '文件名',
   'bucket.destinationKey': '目标 Key',
   'bucket.actionSuccess': '操作完成',
   'bucket.actionFailed': '操作失败',

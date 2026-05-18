@@ -43,9 +43,7 @@ import {
   FileIcon,
   SearchIcon,
   ArrowUpDownIcon,
-  CopyIcon,
   PencilIcon,
-  MoveIcon,
 } from 'lucide-react-native';
 import * as React from 'react';
 import {
@@ -67,7 +65,6 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Clipboard from 'expo-clipboard';
 import { FlashList } from '@shopify/flash-list';
 import type { S3Object, TransferTask } from '@/lib/types';
 import { Progress } from '@/components/ui/progress';
@@ -109,7 +106,7 @@ const TEXT_PREVIEW_MAX_BYTES = 102400;
 
 type ObjectSortMode = 'name' | 'date' | 'size';
 type ObjectTypeFilter = 'all' | 'images' | 'media' | 'docs' | 'other';
-type ObjectAction = 'rename' | 'copy' | 'move';
+type ObjectAction = 'rename';
 type ThumbnailUrlEntry = { url: string; createdAt: number };
 type SearchResultState = { query: string; objects: S3Object[] } | null;
 
@@ -136,6 +133,16 @@ function getObjectFileName(key: string): string {
   const normalized = key.replace(/\/$/, '');
   const index = normalized.lastIndexOf('/');
   return index >= 0 ? normalized.slice(index + 1) : normalized;
+}
+
+function getDefaultCopyKey(key: string): string {
+  const parentPrefix = getObjectParentPrefix(key);
+  const fileName = getObjectFileName(key);
+  const dotIndex = fileName.lastIndexOf('.');
+  if (dotIndex > 0) {
+    return `${parentPrefix}${fileName.slice(0, dotIndex)} copy${fileName.slice(dotIndex)}`;
+  }
+  return `${parentPrefix}${fileName} copy`;
 }
 
 function matchesTypeFilter(object: S3Object, filter: ObjectTypeFilter): boolean {
@@ -451,7 +458,6 @@ export default function ObjectBrowserScreen() {
 
   const crumbs = React.useMemo(() => breadcrumbs(), [currentPrefix]);
   const selectedCount = selectedKeys.size;
-  const fileCount = objects.filter((o) => !o.isFolder).length;
   const proxyHeaders = React.useMemo(
     () => (connectionId ? S3Service.getProxyHeaders(connectionId) : null),
     [connectionId]
@@ -494,6 +500,11 @@ export default function ObjectBrowserScreen() {
     for (const object of searchResults?.objects ?? []) byKey.set(object.key, object);
     return Array.from(byKey.values()).filter((o) => selectedKeys.has(o.key) && !o.isFolder);
   }, [objects, searchResults, selectedKeys]);
+  React.useEffect(() => {
+    if (selectionMode && selectedCount === 0) {
+      setSelectionMode(false);
+    }
+  }, [selectedCount, selectionMode]);
   const shouldShowSearchBusy =
     hasSearchQuery && isSearchingBucket && showSearchBusy && immediateFilteredObjects.length === 0;
   const prewarmImageKeys = React.useMemo(
@@ -1278,55 +1289,58 @@ export default function ObjectBrowserScreen() {
     }
   }, [bucketName, connectionId, selectedObjects]);
 
-  const handleCopyPaths = React.useCallback(async () => {
-    if (selectedObjects.length === 0) return;
-    await Clipboard.setStringAsync(selectedObjects.map((object) => object.key).join('\n'));
-    showNotice(selectedObjects.length === 1 ? t('bucket.pathCopied') : t('bucket.pathsCopied'));
-  }, [selectedObjects, showNotice, t]);
+  const openRenameAction = React.useCallback(() => {
+    const target = selectedObjects[0];
+    if (!target || selectedObjects.length !== 1) return;
+    setObjectAction('rename');
+    setObjectActionTarget(target);
+    setObjectActionKey(getObjectFileName(target.key));
+  }, [selectedObjects]);
 
-  const openObjectAction = React.useCallback(
-    (action: ObjectAction) => {
-      const target = selectedObjects[0];
-      if (!target || selectedObjects.length !== 1) return;
-      setObjectAction(action);
-      setObjectActionTarget(target);
-      setObjectActionKey(
-        action === 'rename'
-          ? getObjectFileName(target.key)
-          : action === 'copy'
-            ? `${target.key}.copy`
-            : target.key
+  const handleCopyObject = React.useCallback(async () => {
+    if (!bucketName || !connectionId) return;
+    const target = selectedObjects[0];
+    if (!target || selectedObjects.length !== 1) return;
+
+    setIsObjectActionRunning(true);
+    try {
+      await S3Service.copyObject(
+        connectionId,
+        bucketName,
+        target.key,
+        getDefaultCopyKey(target.key)
       );
-    },
-    [selectedObjects]
-  );
+      invalidateBucketCache(connectionId, bucketName);
+      await clearBucketSnapshots(connectionId, bucketName);
+      await loadObjects(true);
+      clearSelection();
+      setSelectionMode(false);
+      showNotice(t('bucket.actionSuccess'));
+    } catch (error: any) {
+      showNotice(error?.message || t('bucket.actionFailed'), true);
+    } finally {
+      setIsObjectActionRunning(false);
+    }
+  }, [
+    bucketName,
+    connectionId,
+    selectedObjects,
+    clearBucketSnapshots,
+    loadObjects,
+    clearSelection,
+    showNotice,
+    t,
+  ]);
 
   const confirmObjectAction = React.useCallback(async () => {
     if (!objectAction || !objectActionTarget || !bucketName || !connectionId) return;
     const trimmedKey = objectActionKey.trim();
     if (!trimmedKey) return;
-    const destinationKey =
-      objectAction === 'rename'
-        ? getObjectParentPrefix(objectActionTarget.key) + trimmedKey
-        : trimmedKey;
+    const destinationKey = getObjectParentPrefix(objectActionTarget.key) + trimmedKey;
 
     setIsObjectActionRunning(true);
     try {
-      if (objectAction === 'copy') {
-        await S3Service.copyObject(
-          connectionId,
-          bucketName,
-          objectActionTarget.key,
-          destinationKey
-        );
-      } else {
-        await S3Service.moveObject(
-          connectionId,
-          bucketName,
-          objectActionTarget.key,
-          destinationKey
-        );
-      }
+      await S3Service.moveObject(connectionId, bucketName, objectActionTarget.key, destinationKey);
       invalidateBucketCache(connectionId, bucketName);
       await clearBucketSnapshots(connectionId, bucketName);
       await loadObjects(true);
@@ -1892,34 +1906,23 @@ export default function ObjectBrowserScreen() {
                 <Text className="text-foreground text-sm font-medium">
                   {t('bucket.selectedCount', { count: selectedCount })}
                 </Text>
-                <Text className="text-muted-foreground text-xs">
-                  {t('bucket.objectCount', { count: fileCount })}
-                </Text>
               </View>
               <View className="flex-row gap-2">
-                <Button variant="ghost" size="icon" onPress={handleCopyPaths} className="size-10">
-                  <Icon as={CopyIcon} className="text-foreground size-5" />
-                </Button>
                 {selectedObjects.length === 1 ? (
                   <>
                     <Button
                       variant="ghost"
                       size="icon"
-                      onPress={() => openObjectAction('rename')}
+                      onPress={openRenameAction}
+                      disabled={isObjectActionRunning}
                       className="size-10">
                       <Icon as={PencilIcon} className="text-foreground size-5" />
                     </Button>
                     <Button
                       variant="ghost"
                       size="icon"
-                      onPress={() => openObjectAction('move')}
-                      className="size-10">
-                      <Icon as={MoveIcon} className="text-foreground size-5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onPress={() => openObjectAction('copy')}
+                      onPress={() => void handleCopyObject()}
+                      disabled={isObjectActionRunning}
                       className="size-10">
                       <Icon as={FileIcon} className="text-foreground size-5" />
                     </Button>
@@ -2113,19 +2116,14 @@ export default function ObjectBrowserScreen() {
         }}>
         <DialogContent className="sm:max-w-md" style={{ width: Math.min(viewportWidth - 32, 520) }}>
           <DialogHeader>
-            <DialogTitle>
-              {objectAction === 'rename'
-                ? t('bucket.rename')
-                : objectAction === 'move'
-                  ? t('bucket.move')
-                  : t('bucket.copy')}
-            </DialogTitle>
+            <DialogTitle>{t('bucket.rename')}</DialogTitle>
             <DialogDescription>{objectActionTarget?.name ?? ''}</DialogDescription>
           </DialogHeader>
           <View className="gap-2">
-            <Label>{t('bucket.destinationKey')}</Label>
+            <Label>{t('bucket.fileName')}</Label>
             <Input
-              value={objectActionKey}
+              key={objectActionTarget?.key ?? 'rename-input'}
+              defaultValue={objectActionKey}
               onChangeText={setObjectActionKey}
               autoCapitalize="none"
               autoCorrect={false}

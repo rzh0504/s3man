@@ -248,6 +248,7 @@ export default {
   'bucket.move': 'Move',
   'bucket.copyPath': 'Copy Path',
   'bucket.copyPaths': 'Copy Paths',
+  'bucket.fileName': 'File name',
   'bucket.destinationKey': 'Destination Key',
   'bucket.actionSuccess': 'Operation completed',
   'bucket.actionFailed': 'Operation failed',
