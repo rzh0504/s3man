@@ -77,21 +77,46 @@ function formatAudioTime(seconds: number): string {
 
 function VideoPreview({ url, headers }: { url: string; headers?: Record<string, string> | null }) {
   const source = React.useMemo(() => ({ uri: url, headers: headers ?? undefined }), [headers, url]);
+  const [viewVersion, setViewVersion] = React.useState(0);
+  const [firstFrameReady, setFirstFrameReady] = React.useState(false);
   const player = useVideoPlayer(source, (p) => {
     p.loop = false;
   });
 
+  React.useEffect(() => {
+    setFirstFrameReady(false);
+  }, [source]);
+
+  const handleFullscreenExit = React.useCallback(() => {
+    setFirstFrameReady(false);
+    setViewVersion((version) => version + 1);
+  }, []);
+
   return (
     <View className="w-full items-center justify-center p-4">
-      <VideoView
-        player={player}
-        style={{
-          width: MAX_PREVIEW_WIDTH,
-          height: MAX_PREVIEW_WIDTH * (9 / 16),
-          borderRadius: 12,
-        }}
-        nativeControls
-      />
+      <View className="bg-muted overflow-hidden rounded-xl">
+        <VideoView
+          key={`${url}:${viewVersion}`}
+          player={player}
+          style={{
+            width: MAX_PREVIEW_WIDTH,
+            height: MAX_PREVIEW_WIDTH * (9 / 16),
+          }}
+          nativeControls
+          fullscreenOptions={{ enable: true }}
+          useExoShutter={false}
+          surfaceType={Platform.OS === 'android' ? 'textureView' : undefined}
+          onFirstFrameRender={() => setFirstFrameReady(true)}
+          onFullscreenExit={handleFullscreenExit}
+        />
+        {!firstFrameReady ? (
+          <View
+            pointerEvents="none"
+            className="absolute inset-0 items-center justify-center bg-black">
+            <ActivityIndicator size="small" color="#fff" />
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 }
