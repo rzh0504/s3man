@@ -252,6 +252,8 @@ export default {
   'bucket.destinationKey': 'Destination Key',
   'bucket.actionSuccess': 'Operation completed',
   'bucket.actionFailed': 'Operation failed',
+  'bucket.imageCopied': 'Image copied',
+  'bucket.copyFileUnsupported': 'Copying this file type is not supported on this platform',
   'bucket.pathCopied': 'Path copied',
   'bucket.pathsCopied': 'Paths copied',
 

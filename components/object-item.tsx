@@ -19,6 +19,12 @@ import React from 'react';
 import { View, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import type { LucideIcon } from 'lucide-react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 type FileTypeInfo = { icon: LucideIcon; color: string };
 
@@ -78,6 +84,8 @@ interface ObjectItemProps {
 }
 
 const ICON_SIZE = 24;
+const ROW_GAP = 12;
+const CHECKBOX_SLOT_WIDTH = 16 + ROW_GAP;
 const THUMB_RADIUS = 6;
 const loadedThumbnailCacheKeys = new Set<string>();
 
@@ -139,9 +147,45 @@ function ImageThumbnail({
 
 function FileTypeIcon({ info }: { info: FileTypeInfo }) {
   return (
-    <View className="items-center justify-center" style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+    <View
+      className="items-center justify-center"
+      style={{ width: ICON_SIZE, height: ICON_SIZE, marginRight: ROW_GAP }}>
       <Icon as={info.icon} className={`${info.color} size-5`} />
     </View>
+  );
+}
+
+function SelectionCheckboxSlot({
+  checked,
+  visible,
+  onToggle,
+}: {
+  checked: boolean;
+  visible: boolean;
+  onToggle: () => void;
+}) {
+  const progress = useSharedValue(visible ? 1 : 0);
+
+  React.useEffect(() => {
+    progress.value = withTiming(visible ? 1 : 0, {
+      duration: 160,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [progress, visible]);
+
+  const slotStyle = useAnimatedStyle(() => ({
+    width: CHECKBOX_SLOT_WIDTH * progress.value,
+    opacity: progress.value,
+  }));
+
+  return (
+    <Animated.View
+      style={[{ overflow: 'hidden' }, slotStyle]}
+      pointerEvents={visible ? 'auto' : 'none'}>
+      <View style={{ width: 16 }}>
+        <Checkbox checked={checked} onCheckedChange={onToggle} />
+      </View>
+    </Animated.View>
   );
 }
 
@@ -164,15 +208,15 @@ export const ObjectItem = React.memo(function ObjectItem({
       <Pressable
         onPress={onPress}
         onLongPress={onLongPress}
-        className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
-        {selectionMode && <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />}
+        className="active:bg-accent flex-row items-center px-4 py-3">
+        <SelectionCheckboxSlot checked={isSelected} visible={selectionMode} onToggle={onToggle} />
         <View
           className="items-center justify-center"
-          style={{ width: ICON_SIZE, height: ICON_SIZE }}>
+          style={{ width: ICON_SIZE, height: ICON_SIZE, marginRight: ROW_GAP }}>
           <Icon as={FolderIcon} className="size-5 text-blue-600" />
         </View>
         <Text className="text-foreground flex-1">{folderName}</Text>
-        <Text className="text-muted-foreground w-20 text-right text-xs">-</Text>
+        <Text className="text-muted-foreground ml-3 w-20 text-right text-xs">-</Text>
       </Pressable>
     );
   }
@@ -184,22 +228,24 @@ export const ObjectItem = React.memo(function ObjectItem({
     <Pressable
       onPress={onPress}
       onLongPress={onLongPress}
-      className="active:bg-accent flex-row items-center gap-3 px-4 py-3">
-      {selectionMode && <Checkbox checked={isSelected} onCheckedChange={() => onToggle()} />}
+      className="active:bg-accent flex-row items-center px-4 py-3">
+      <SelectionCheckboxSlot checked={isSelected} visible={selectionMode} onToggle={onToggle} />
       {showThumbnail ? (
-        <ImageThumbnail
-          url={thumbnailUrl}
-          cacheKey={thumbnailCacheKey}
-          headers={thumbnailHeaders}
-          onError={onThumbnailError}
-        />
+        <View style={{ marginRight: ROW_GAP }}>
+          <ImageThumbnail
+            url={thumbnailUrl}
+            cacheKey={thumbnailCacheKey}
+            headers={thumbnailHeaders}
+            onError={onThumbnailError}
+          />
+        </View>
       ) : (
         <FileTypeIcon info={fileTypeInfo} />
       )}
       <Text className="text-foreground flex-1" numberOfLines={1}>
         {object.name}
       </Text>
-      <Text className="text-muted-foreground w-20 text-right text-xs">
+      <Text className="text-muted-foreground ml-3 w-20 text-right text-xs">
         {object.size != null ? formatBytes(object.size) : '-'}
       </Text>
     </Pressable>

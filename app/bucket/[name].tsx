@@ -65,6 +65,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Clipboard from 'expo-clipboard';
 import { FlashList } from '@shopify/flash-list';
 import type { S3Object, TransferTask } from '@/lib/types';
 import { Progress } from '@/components/ui/progress';
@@ -133,16 +134,6 @@ function getObjectFileName(key: string): string {
   const normalized = key.replace(/\/$/, '');
   const index = normalized.lastIndexOf('/');
   return index >= 0 ? normalized.slice(index + 1) : normalized;
-}
-
-function getDefaultCopyKey(key: string): string {
-  const parentPrefix = getObjectParentPrefix(key);
-  const fileName = getObjectFileName(key);
-  const dotIndex = fileName.lastIndexOf('.');
-  if (dotIndex > 0) {
-    return `${parentPrefix}${fileName.slice(0, dotIndex)} copy${fileName.slice(dotIndex)}`;
-  }
-  return `${parentPrefix}${fileName} copy`;
 }
 
 function matchesTypeFilter(object: S3Object, filter: ObjectTypeFilter): boolean {
@@ -1302,35 +1293,36 @@ export default function ObjectBrowserScreen() {
     const target = selectedObjects[0];
     if (!target || selectedObjects.length !== 1) return;
 
+    if (!S3Service.isImageFile(target.name)) {
+      showSystemToast(t('bucket.copyFileUnsupported'));
+      return;
+    }
+
     setIsObjectActionRunning(true);
+    let temporaryUri: string | null = null;
     try {
-      await S3Service.copyObject(
-        connectionId,
-        bucketName,
-        target.key,
-        getDefaultCopyKey(target.key)
-      );
-      invalidateBucketCache(connectionId, bucketName);
-      await clearBucketSnapshots(connectionId, bucketName);
-      await loadObjects(true);
-      clearSelection();
-      setSelectionMode(false);
-      showNotice(t('bucket.actionSuccess'));
+      const baseDirectory = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+      if (!baseDirectory) throw new Error(t('bucket.actionFailed'));
+
+      const url = await S3Service.getFileUrl(connectionId, bucketName, target.key);
+      temporaryUri = `${baseDirectory}clipboard-${generateId()}-${target.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const downloadResult = await FileSystem.downloadAsync(url, temporaryUri, {
+        headers: S3Service.getProxyHeaders(connectionId) || undefined,
+      });
+      const base64Image = await FileSystem.readAsStringAsync(downloadResult.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      await Clipboard.setImageAsync(base64Image);
+      showSystemToast(t('bucket.imageCopied'));
     } catch (error: any) {
-      showNotice(error?.message || t('bucket.actionFailed'), true);
+      showSystemToast(error?.message || t('bucket.actionFailed'));
     } finally {
+      if (temporaryUri) {
+        await FileSystem.deleteAsync(temporaryUri, { idempotent: true }).catch(() => {});
+      }
       setIsObjectActionRunning(false);
     }
-  }, [
-    bucketName,
-    connectionId,
-    selectedObjects,
-    clearBucketSnapshots,
-    loadObjects,
-    clearSelection,
-    showNotice,
-    t,
-  ]);
+  }, [bucketName, connectionId, selectedObjects, showSystemToast, t]);
 
   const confirmObjectAction = React.useCallback(async () => {
     if (!objectAction || !objectActionTarget || !bucketName || !connectionId) return;
