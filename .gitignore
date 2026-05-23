@@ -44,4 +44,3 @@ expo-env.d.ts
 # @end expo-cli
 scripts/upload-github-release.mjs
 docs/expo-sdk-56-migration.md
-pnpm-workspace.yaml
