@@ -40,7 +40,7 @@ import Animated, {
   withSequence,
   Easing,
 } from 'react-native-reanimated';
-import { Uniwind, useUniwind } from 'uniwind';
+import { useUniwind } from 'uniwind';
 import { useRouter } from 'expo-router';
 
 const TRANSFER_HISTORY_OPTIONS = [1, 3, 7] as const;
@@ -137,6 +137,7 @@ export default function ConfigScreen() {
   const {
     showThumbnails,
     setShowThumbnails,
+    setTheme: setAppTheme,
     language,
     setLanguage,
     transferHistoryDays,
@@ -168,8 +169,8 @@ export default function ConfigScreen() {
       withTiming(0.65, { duration: 80, easing: Easing.out(Easing.quad) }),
       withTiming(1, { duration: 180, easing: Easing.out(Easing.back(3)) })
     );
-    Uniwind.setTheme(theme === 'dark' ? 'light' : 'dark');
-  }, [closeDropdown, theme, themeScale]);
+    setAppTheme(theme === 'dark' ? 'light' : 'dark');
+  }, [closeDropdown, setAppTheme, theme, themeScale]);
 
   const toggleLanguage = React.useCallback(() => {
     closeDropdown();
