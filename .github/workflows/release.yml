@@ -52,7 +52,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Generate Android project
-        run: pnpm exec expo prebuild --platform android --non-interactive
+        run: |
+          rm -rf android
+          pnpm exec expo prebuild --platform android --non-interactive
 
       - name: Tune Gradle for CI
         working-directory: android
