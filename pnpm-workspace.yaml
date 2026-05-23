@@ -1,2 +1,5 @@
-allowBuilds:
-  msgpackr-extract: false
+packages:
+  - .
+
+nodeLinker: hoisted
+strictDepBuilds: false
