@@ -18,6 +18,7 @@ import {
   type S3ClientConfig,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { Buffer } from 'buffer';
 import type { S3Config, BucketInfo, S3Object } from '@/lib/types';
 import { getProvider, buildEndpointUrl, normalizeRegion } from '@/lib/constants';
 import {
