@@ -5,7 +5,7 @@ import { DatabaseIcon, ArrowLeftRightIcon, SettingsIcon } from 'lucide-react-nat
 import type { LucideIcon } from 'lucide-react-native';
 import { View, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useT } from '@/lib/i18n';
 import type { TranslationKey } from '@/lib/i18n';
