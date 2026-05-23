@@ -54,7 +54,18 @@ jobs:
       - name: Generate Android project
         run: |
           rm -rf android
-          pnpm exec expo prebuild --platform android --non-interactive
+          CI=1 pnpm exec expo prebuild --platform android
+
+      - name: Validate Expo autolinking
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Node: $(node --version)"
+          echo "pnpm: $(pnpm --version)"
+          node --print "require.resolve('expo/package.json')"
+          node --print "require.resolve('expo-modules-autolinking/package.json', { paths: [require.resolve('expo/package.json')] })"
+          pnpm exec expo-modules-autolinking resolve --platform android --project-root "$PWD" --json > expo-autolinking-resolve.json
+          pnpm exec expo-modules-autolinking react-native-config --platform android --project-root "$PWD" --source-dir android/app --json > expo-react-native-config.json
 
       - name: Tune Gradle for CI
         working-directory: android
@@ -79,7 +90,18 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew --stop || true
-          ./gradlew assembleRelease --stacktrace --no-daemon
+          ./gradlew assembleRelease --no-daemon --console=plain --warning-mode=summary
+
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-diagnostics
+          path: |
+            expo-autolinking-resolve.json
+            expo-react-native-config.json
+            android/build/reports/problems/
+          if-no-files-found: ignore
 
       - name: Upload APK to GitHub release
         uses: softprops/action-gh-release@v2
