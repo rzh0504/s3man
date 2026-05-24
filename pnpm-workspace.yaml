@@ -1,5 +1,8 @@
 packages:
   - .
 
+allowBuilds:
+  msgpackr-extract: false
+
 nodeLinker: hoisted
 strictDepBuilds: false

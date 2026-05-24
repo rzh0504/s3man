@@ -87,10 +87,12 @@ jobs:
       - name: Build release APK
         working-directory: android
         shell: bash
+        env:
+          NODE_ENV: production
         run: |
           chmod +x ./gradlew
           ./gradlew --stop || true
-          ./gradlew assembleRelease --no-daemon --console=plain --warning-mode=summary
+          ./gradlew assembleRelease --no-daemon --console=plain --warning-mode=summary --stacktrace
 
       - name: Upload build diagnostics
         if: failure()

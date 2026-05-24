@@ -16,7 +16,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.999.0",
     "@aws-sdk/s3-request-presigner": "^3.999.0",
-    "@expo/dom-webview": "^55.0.6",
+    "@expo/dom-webview": "~56.0.5",
     "@expo/metro-runtime": "^56.0.12",
     "@rn-primitives/accordion": "^1.2.0",
     "@rn-primitives/alert-dialog": "^1.2.0",
