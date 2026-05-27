@@ -21,7 +21,7 @@
 
 |                                 存储桶列表                                 |                                文件浏览                                |                                  文件预览                                  |
 | :------------------------------------------------------------------------: | :--------------------------------------------------------------------: | :------------------------------------------------------------------------: |
-| ![buckets](https://s3.hi168.com/hi168-25959-33617kcp/s3man/bucketlist.jpg) | ![files](https://s3.hi168.com/hi168-25959-33617kcp/s3man/filelist.jpg) | ![preview](https://s3.hi168.com/hi168-25959-33617kcp/s3man/previewimg.jpg) |
+| ![buckets](https://s3.bmp.ovh/2026/05/27/nhiTDxHo.jpg) | ![files](https://s3.bmp.ovh/2026/05/27/YoSwYeaC.jpg) | ![preview](https://s3.bmp.ovh/2026/05/27/LbLmyFnl.jpg) |
 
 ## 技术栈
 
